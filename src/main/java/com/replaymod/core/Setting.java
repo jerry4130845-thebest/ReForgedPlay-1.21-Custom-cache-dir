@@ -4,6 +4,7 @@ public final class Setting<T> extends SettingsRegistry.SettingKeys<T> {
     public static final Setting<Boolean> NOTIFICATIONS = make("notifications", "notifications", true);
     public static final Setting<String> RECORDING_PATH = advanced("recordingPath", null, "./replay_recordings/");
     public static final Setting<String> CACHE_PATH = advanced("cachePath", null, "./.replay_cache/");
+    public static final Setting<String> TEMP_PATH = advanced("tempPath", null, "");
 
     private static <T> Setting<T> make(String key, String displayName, T defaultValue) {
         return new Setting<>("core", key, displayName, defaultValue);

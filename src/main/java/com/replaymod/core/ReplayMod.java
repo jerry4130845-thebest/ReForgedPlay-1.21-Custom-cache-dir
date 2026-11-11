@@ -17,6 +17,7 @@ import com.replaymod.replaystudio.lib.viaversion.api.protocol.version.ProtocolVe
 import com.replaymod.replaystudio.studio.ReplayStudio;
 import com.replaymod.replaystudio.util.I18n;
 import com.replaymod.simplepathing.ReplayModSimplePathing;
+import de.johni0702.minecraft.gui.versions.Image;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.resource.DirectoryResourcePack;
 import net.minecraft.text.Style;
@@ -86,6 +87,7 @@ public class ReplayMod implements Module, Scheduler {
 
     public ReplayMod(ReplayModBackend backend) {
         this.backend = backend;
+        Image.setTempFileFactory(folders::createImageTempFile);
 
         I18n.setI18n(net.minecraft.client.resource.language.I18n::translate);
 

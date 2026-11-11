@@ -1,6 +1,6 @@
 # ReForgedPlay 自定义目录与 RAMDisk 支持计划
 
-> 状态：第一批兼容修订已完成 A2→B2→C2→D2，并经 Lead 回读日志与代码复核：Java 21 隔离验证 PASS=14 / SKIP=1 / FAIL=0，完整 build 成功。当前停在可供用户自行 commit 的“完整回放安全搬移基础”检查点；游戏内 cut/split/raw 播放及确定性故障注入尚未验收，不是完整 RAMDisk 功能或生产可用性结论。**第 11 节是本批范围；第 11.9–11.12 节为已实现修订，第 11.13 节为真实结果；第 11.3 节冲突算法及第 11.8 节失败结果保留为历史。第 3–10 节为尚未完成的长期路线，不自动进入下一批。** 代理未执行 Git 写操作。
+> 状态：第一批基线为用户提交 9762f30。第二批已完成 A→B→C→D 和 Lead 日志/代码复核，限定为普通 tempPath、图片中间文件生命周期及 Image factory 注入，停在源码/隔离控制流/构建检查点等待用户自行 commit。**真实 Minecraft/native PNG 编码与游戏内验收仍未完成**：独立 native 探针在构造阶段因找不到 lwjgl.dll 停止。第 12.10 节记录真实结果和限制；第 12 节是本批唯一白名单，第 11 节为已提交历史，第 3–10 节为长期路线，不自动进入后批。代理未执行 Git 写操作。
 > 用户目标：独立配置 cache、raw、temp、tmp、record 等目录，支持绝对路径及相对于游戏目录的路径；将可丢弃缓存和临时文件放在 RAMDisk，用完清理，减少实体硬盘写入。没有已报告故障，本次属于预防性兼容与容错设计。
 
 ## 1. 项目基线与证据边界
@@ -350,3 +350,142 @@ A 本轮先确认既有 Loom/NeoForge/Java 21 年代，加载本机 minecraft-ja
 - 本批仅完成 raw 原始回放备份前的完整文件搬移基础；尚未添加 raw/temp/tmp/录制工作目录配置、即时缓存清理、GUI 异步发布或 ReplayStudio 保存窗口适配。**停在本检查点，等待用户自行 commit，不自动进入后批。** 临时测试证据保留在仓库外，不自动清理或装包。
 
 D2 原话：这次 Windows 空 fileKey 的成功搬移已有真实证据，但没测到的故障和游戏结果，我不会替它们签通过。
+
+## 12. 第二批：普通 tempPath 与图片中间文件（批准范围；A 方案，2026-11-11）
+
+### 12.1 基线、目标、成功标准与严格排除项
+
+A 已重读既有计划、四份目标源码、设置注册/重载、模组入口及 Image 调用方；只读核实 HEAD=9762f30，开工前工作区 clean。已读取本机 minecraft-java-build、minecraft-neoforge-mod 技能；未将技能的新项目模板应用到既有工程。保留 Minecraft 1.21.1、NeoForge 21.1.82、Java 21、Architectury Loom 1.7-SNAPSHOT、Gradle 8.8 和 layered Yarn 映射，元数据为 [neoforge.mods.toml](<src/main/resources/META-INF/neoforge.mods.toml>)；并存其他加载器元数据不构成迁移授权。[构建脚本](<build.gradle>)、[版本属性](<gradle.properties>)、[wrapper](<gradle/wrapper/gradle-wrapper.properties>)、[ReplayStudio JAR](<libs/ReplayStudio-master-SNAPSHOT-slim.jar>) 仅核查、不改。现代 Java 21 年代不等于须改用 ModDevGradle；无新依赖、无新 NeoForge API。
+
+**仅实现** `advanced.tempPath` 字符串配置、一次图片操作一个独占任务目录与固定 payload、通用 Image 可注入 factory、ReplayMod 注册该 factory。成功标准是：实际 `writePNG(OutputStream)` 经过已注入 factory，正常/编码失败/写出失败均释放本任务中间文件，保留主异常与 cleanup 的 suppressed 诊断；不关闭/flush 调用者 OutputStream；默认空配置仍选择 JDK 默认临时位置，而不是游戏根目录。指定盘失败不悄悄改写其他盘。
+
+**不实现/不触碰** rawPath、tmpPath、recordingWorkPath、cache 清理、其他 temp 使用者、启动/退出遗留扫描、全 JVM `java.io.tmpdir` 修改、恢复/事务保存、GUI 文案/GUI 设置页、依赖/构建/wrapper/元数据/README/实际游戏配置/仓库测试/.env。不新增任何源码文件；第一批 [ReplayFileOperations.java](<src/main/java/com/replaymod/core/files/ReplayFileOperations.java>)、[MarkerProcessor.java](<src/main/java/com/replaymod/editor/gui/MarkerProcessor.java>) 原样保留。不 Git 写、不装包、不访问 whale-craft、不启动真实游戏；仅外部 C:/Temp、R:/Temp 小样本验证。本批不承诺清理崩溃或断电残留，不承诺 RAMDisk 数据持久性。
+
+### 12.2 B/C/D 精确白名单与所有权
+
+下列四份既有源码是**完整源码白名单**，顺序 B→C→D，不并行写同文件。A 仅写本小写计划；B/C/D 对计划只读，结果交 Lead 记录。本批 D 默认不改源码，有问题回报 Lead/C，不擅自扩大范围。
+
+| 文件 | B：最小框架/契约 | C：功能实现 | D：只读审查与验证 |
+| --- | --- | --- | --- |
+| [Setting.java](<src/main/java/com/replaymod/core/Setting.java>) | 增加 `public static final Setting<String> TEMP_PATH = advanced("tempPath", null, "")` | 核对注册能自动发现、默认兼容；不加其他键 | 检查只有该新键，真实配置未改 |
+| [ReplayFoldersService.java](<src/main/java/com/replaymod/core/files/ReplayFoldersService.java>) | 声明唯一新实例入口 `public Image.TemporaryFile createImageTempFile() throws IOException` 及必要私有路径解析；未实现必须显式抛错 | 每次读取一次设置、按 mcDir 解析，调用 Image 中纯 JDK 句柄创建逻辑 | 实际生产服务用外部依赖 stub 隔离验证，旧方法不改 |
+| [Image.java](<src/main/java/de/johni0702/minecraft/gui/versions/Image.java>) | 定义下节嵌套 factory/句柄 API、默认可用 factory；不先把实际写出切到占位逻辑 | 实现纯 JDK 任务生命周期与 TWR，实际 OutputStream 重载接入；不得 import 任何 com.replaymod 类型 | 编译/运行实际整份源码；区分 stub 控制流验证与真实 MC/native 验证 |
+| [ReplayMod.java](<src/main/java/com/replaymod/core/ReplayMod.java>) | 只读核实注册位置，不提前接入未完成框架 | 在构造器最前适当位置注册 `Image.setTempFileFactory(folders::createImageTempFile)`，只加必要 import/一处注册 | 核对初始化无环、实际注入时序/字节码；不运行真实 Backend/配置加载 |
+| [plan.md](<plan.md>) | 只读 | 只读 | 只读，报告交 Lead；A 本轮只更新顶部和第 12 节 |
+
+不得增加新顶层类/策略框架/资源注册器/线程池/故障注入钩子。B 的占位不能算完成，C 全部实现后才交 D。若四文件内无法安全实现，或必要验证需要越界，明确 BLOCKED 并停下，不“顺便”改其他文件。
+
+### 12.3 最小自有 API 与职责（新设计，不冒称现有外部 API）
+
+所有新类型嵌在既有 Image 中，避免额外源码，也避免通用 GUI 依赖模组。建议固定为：
+
+- `public interface TempFileFactory { TemporaryFile create() throws IOException; }`，可加 `@FunctionalInterface`。
+- `public static void setTempFileFactory(TempFileFactory factory)`：拒绝 null；仅替换一个 `private static volatile` 引用，不做 IO、读配置或访问 NativeImage/ReplayMod。无需 getter/reset/监听器框架。
+- `public static final class TemporaryFile implements AutoCloseable`：纯 JDK 字段和逻辑，私有构造；`public static TemporaryFile create(Path root) throws IOException`、`public Path path()`、`public void close() throws IOException`。root=null 仅表示调用 JDK 默认临时目录创建重载；非 null 必须已经是解析后的绝对路径。内部持有 final canonicalRoot/taskDirectory/payload；不持有服务、配置、factory 或 OutputStream。`path()` 返回固定 payload；已关闭后拒绝取新写入路径（IllegalStateException）。不返回任意可由调用者拼装的删除目标。
+- 默认 factory 是延迟执行 `TemporaryFile.create(null)` 的 lambda，类初始化只建立对象引用，不创建磁盘文件、不访问 MC、不读取 ReplayMod 单例。共享生命周期核心在此嵌套静态类中，**不调用 Image 外层/NativeImage/设置 API**。前缀可用 `.jgui-image-`；名称只是辅助诊断，真正归属是 createTempDirectory 成功返回后句柄持有的精确任务路径，不通过名字认领旧目录。ReplayMod 注入后这些句柄就是模组此次任务专属资源，不必再建可扫描的全局命名空间。
+- `ReplayFoldersService.createImageTempFile()`：只读取一次 `settings.get(Setting.TEMP_PATH)` 为局部 String，再解析 root，调用 `TemporaryFile.create(root)`。路径解析可以私有静态 helper，不为测试增加公共服务构造/依赖接口；旧 replay/raw/recording/cache 逻辑原样不动。
+- `writePNG(OutputStream)` 在进入时快照 volatile factory 到局部变量，只调用一次 create；用 TWR 持有非 null 句柄（对不合法 factory 的 null 结果明确拒绝）。顺序为 `inner.writeTo(handle.path())` → `Files.copy(handle.path(), outputStream)` → TWR close。不将调用者流放进 TWR，不调用它的 close 或 flush，不关闭 Image/NativeImage，不改 `writePNG(File)` 或其他图片 API。
+
+返回具体 final 句柄而非又添一个通用资源接口，足够满足当前唯一图片使用者；不增加“所有临时用途”的生命周期体系。可注入 factory 必须遵守 create 失败自行清理已分配资源的契约，Image 不可能替未返回句柄的任意外部 factory 猜路径收尾。本模组 factory 复用同一标准实现以满足此义务。
+
+### 12.4 tempPath 的精确定义、创建和快照
+
+1. 新键只用普通 advanced 字符串，默认 `""`，displayName=null，沿既有注册机制，不另建 GUI。null（防御性）、空串和全空白按未配置处理。**先判断空值再解析 Path**，不能 Path.of("") 后当游戏目录清理。非空白值不擅自 trim，不展开 `%TEMP%`/`${...}`/`~`，不猜“R 就是 RAMDisk”。
+2. 非空白通过默认文件系统解析。绝对路径按原卷使用；普通相对路径相对于现有 `mcDir`（MinecraftClient.runDirectory），然后转绝对并 normalize。`..` 按用户路径语义归一，可位于游戏目录外；不能改用 shell cwd。Windows `R:Temp`、`R:`、`\\Temp` 这种有 root 但不完整绝对的路径必须拒绝，避免驱动器当前目录/当前卷隐式补全；以 `!isAbsolute && getRoot()!=null` 检出，不用字符串错误消息猜测。不支持 URL 或设备路径作为额外语法。
+3. InvalidPathException、权限相关 SecurityException 及必要的 UnsupportedOperationException 包装成带 cause 的 IOException，消息包含 `tempPath` 原值、解析目标（若已知）和阶段；不把无权限误报为空配置。root 已是文件、父目录无权限、R 未挂载/中途消失、空间不足、编码或复制 IO 错误均向上报错，不改用默认位置、不自动建/卸载磁盘。
+4. 显式 root 不存在时允许 `Files.createDirectories(root)` 建普通父目录；已挂载盘才可能成功。失败可能留下部分新父目录，这是用户指定位置，不向上删除“回滚”。空值走 `Files.createTempDirectory(prefix)`，保留 JDK 默认位置选择及系统策略，不调用 System.setProperty、不修改全 JVM 行为；JDK 默认 temp 本身不可用也明确失败。
+5. 显式 root 建好后 `toRealPath()` 固定真实目录；允许用户选择的现有根目录别名在任务开始时解析到其真实目标，但不扫描它或清理任何兄弟项。再 `Files.createTempDirectory(canonicalRoot, prefix)` 原子分配独占任务目录。默认重载成功后也固定其父真实路径和本任务真实路径。每个任务固定 `image.png`（预先 `Files.createFile`，CREATE_NEW 语义）为唯一 payload；不用 createTempFile 再覆盖其他人的名字，不在用户 root 直接写随机散落文件。
+6. 每任务从读取设置到句柄返回只使用这次 String/root 快照；已创建句柄 close 只用 final 路径，**不重新查设置、不读取全局 factory**。重载后新任务读新值，老任务仍清理老位置。切换到不可用新盘只让新任务失败，不能搬移/清除旧任务。volatile factory 的并发替换仅影响以后获取引用的 writePNG 调用；已快照 factory 或已创建句柄不改变。这里不修改现有 settings watcher 的线程模型或全项目配置一致性。
+
+### 12.5 任务生命周期、异常优先级、幂等与链接边界
+
+**创建阶段**：先准备用户 root（永不取得删除 root 的所有权），后独占 taskDirectory，后固定 payload，最后才交出句柄。每一步成功就记录路径/是否由本次创建；payload 创建或后续构造校验失败时，factory 自己按相同安全边界清理已创建 payload（仅确实创建成功时）再删空 taskDirectory。不得因为固定名字碰到既有项就认领它；CREATE_NEW 失败时不删该冲突项。清理失败 addSuppressed 到原创建异常；IOException 保留 cause、phase/root/task/payload，失败未到达的路径标为未创建。不要在普通 finally 抛 cleanup 覆盖创建异常。不能恢复的 VM 终止/断电不在此保证内。
+
+**用完清理**：普通图片中间文件无恢复价值；无论编码/复制成功或失败，均由 TWR 尝试清理。NativeImage.writeTo 返回/抛出之前已经关闭自己文件 channel（下节实际 JAR 证据），Files.copy 的内部输入也在退出时释放，之后删除 payload，再删除空 taskDirectory。不递归、不枚举删除孩子、不删 canonicalRoot/其父，不跟随 payload 符号链接读写/清理目标。不因为名称像 tmp/png/replaymod 就处理任何历史文件。若 payload 删除失败，不继续假装目录清理成功；若 payload 已删而目录非空/占用，保留目录并报其精确位置，不删多余文件。
+
+**链接/替换最小保护**：创建时记录真实 root 和真实 taskDirectory，并确认 task 是 root 的直接孩子；payload 必须是 task 的固定直接孩子。操作前/close 前检查 root/task 当前真实路径仍等于记录路径，task 的 NOFOLLOW BasicFileAttributes 是目录而非符号链接/other；payload 若存在，用 NOFOLLOW 属性确认普通文件，不是目录/符号链接/other。检测到链接/junction、路径重定向、无法确认类型或身份边界时停止向下访问/删除，抛带定位信息的 IOException，不进入其目标。不要用 `Files.isDirectory/exists` 的 false 混淆“不存在”与“无权限”，缺失仅在明确 NoSuchFileException 时按相应阶段处理。默认 provider 的 junction 与 toRealPath 实际行为交 D 验证；不得以 isSymbolicLink 单一 false 宣称无 junction。
+
+本批不加 FileStore/DOS/fileKey/硬链接/磁盘容量或可选 ACL 属性要求；BasicFileAttributes 与 toRealPath 是边界检查而非 RAMDisk 身份认证。**可信根目录/任务期间父路径不被外界恶意置换是明确前提**：以上检查不是原子条件删除，不能消除检查至 write/delete 的 TOCTOU，纯路径式 JDK API 不是对恶意用户的安全沙箱。用户指定链接根在创建时显式解析一次不等于递归清理跟随链接；close 不遍历任何文件树。task 被换成指向外部的 junction 时，必须在访问 payload 前拒绝；若当前 provider 无法可靠确认该边界，报错保留，不降级递归删除。
+
+**幂等选择**：句柄只有一次清理尝试；`close()` 开始先置终结状态（可 synchronized，避免两个线程同时清理），此后再次 close 为无副作用 no-op，包含首轮失败后亦不再尝试删除后来可能复用的路径。已删除/明确缺失的 payload 可继续删本任务空目录；task 已明确不存在时不寻找/重建。失败位置由异常保留供用户定位，不增后台重试器/退出钩子/deleteOnExit。不得将失败后的重复 close 说成自动重试通过。若 API 更名/状态策略必须变更，先回 Lead 更新契约。
+
+**异常优先级**：TWR 使原编码/复制异常仍为主异常，cleanup IOException 成为 suppressed；不捕获后丢掉原异常，不重新 throw 一个无 cause 的错误。只有 cleanup 失败时，抛明确 `temporary image cleanup failed` 的 IOException，含 root/task/payload/阶段，提醒 output 可能已经写完（不为任意 OutputStream 提供事务回滚，不诱导盲目重试到原流）。创建失败中的 cleanup 同样 suppressed；难以确定的遗留状态写“可能存在”，不虚报文件一定保留。Error/RuntimeException 发生在 TWR 主体也应触发正常资源收尾，但不承诺 OOM/进程终止的完整清理。
+
+### 12.6 初始化顺序与实际接入证据
+
+- [ReplayMod.java](<src/main/java/com/replaymod/core/ReplayMod.java#L60-L109>)：实例字段先创建 settingsRegistry、注册 Setting.class、设置 instance，然后 folders/files，再进入构造器，构造器末才 `settingsRegistry.register()` 读实际配置；[ReplayModBackend.java](<src/main/java/com/replaymod/core/ReplayModBackend.java#L13-L21>) 构造 ReplayMod 后在 construct 事件调用 initModules；initModules 先所有 initCommon 再 initClient。不能只凭方法名把“register”误当在构造器之前完成。
+- [Utils.java](<src/main/java/com/replaymod/core/utils/Utils.java#L84-L95>) 静态默认缩略图用 Image.read，模块构造/静态类引用可能提前触发 Image 初始化；不能假定 Image 到 initClient 才首次加载。Image 类初始化必须完全独立于 ReplayMod。
+- **C 注册位置决定**：ReplayMod 构造器 `this.backend = backend` 后、I18n/协议检查/各模块构造之前，调用一次 setter，捕获已经构造好的 `folders` 实例方法引用。setter 不立即调用 factory，不 IO，不读设置，因此不会由此重入 Utils/ReplayMod。注册前早期 Image 写出仍能用默认 factory；注册后现有 Image 实例的每次 OutputStream 写出都从静态 factory 获取新任务，不把 factory 固定在 Image 构造器里。无须等 initClient，也不在静态初始化器使用 `ReplayMod.instance`。
+- factory 在注册时不缓存 tempPath；设置加载前若真有早期任务，读注册的空默认值，加载/重载后的新任务才读新值；不为早期任务追溯迁移。实例字段初始化早于构造器注册的窗口不能承诺覆盖，但默认可用；当前只读搜索未见这个窗口的 `writePNG(OutputStream)` 调用，仍交 D 核实，不宣称全 mod 载入顺序已实机验证。
+- [BlendMaterials.java](<src/main/java/com/replaymod/render/blend/BlendMaterials.java#L46>) 的 stream 写出与 Image.toBufferedImage 内部写出会经过 factory；[PNGWriter.java](<src/main/java/com/replaymod/render/PNGWriter.java>)、[ScreenshotWriter.java](<src/main/java/com/replaymod/extras/advancedscreenshots/ScreenshotWriter.java>) 使用 File 重载，不属于中间文件改写目标。不能以其他输出路径仍在原处认定注入失效，也不能为了“覆盖所有图片”改这些文件。
+
+### 12.7 API/官方文档/实际 JAR 核实（2026-11-11；不是功能已测）
+
+本次已 web_search 并读取下列正文；新公开方法/类型是 12.3 的项目自有设计，不冒充 Minecraft API。无新增 Maven 坐标或 NeoForge 调用，保持本地现有版本配对。
+
+| 已核实事实 | 来源与用途 |
+| --- | --- |
+| Files.createTempDirectory(Path,String,FileAttribute<?>...) 与默认目录重载；createFile/createDirectories/deleteIfExists/readAttributes | [Oracle Java 21 Files](<https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/nio/file/Files.html>)：独占创建、父目录创建可能部分成功；delete 空目录/链接项，不递归；所有实现支持 basic 属性，不把可选 DOS/fileKey 当必要能力 |
+| Path.of / isAbsolute / getRoot / resolve / normalize / toRealPath | [Oracle Java 21 Path](<https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/nio/file/Path.html>)：空路径代表默认目录；resolve 遇绝对目标返回目标；normalize 是词法操作、并非链接隔离；toRealPath 需要存在且默认解析链接 |
+| AutoCloseable.close 可收窄为 IOException；幂等需要实现者自行保证 | [Oracle Java 21 AutoCloseable](<https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/AutoCloseable.html>)，不依赖 GC/finalize 做任务清理 |
+| TWR 保留主体异常、close 失败 suppressed，逆序关闭资源 | [Oracle 官方 TWR 教程](<https://docs.oracle.com/javase/tutorial/essential/exceptions/tryResourceClose.html>)（页面是 JDK8 教程，语义沿用；不是 JDK21 新 API）；[JLS21 14.20.3](<https://docs.oracle.com/javase/specs/jls/se21/html/jls-14.html#jls-14.20.3>) 为规范索引，整页抓取被截断，未把截断部分当逐段核实证据 |
+| NativeImage.writeTo(Path) throws IOException，File 重载与 close | [Fabric Yarn 1.21+build.1 NativeImage API](<https://maven.fabricmc.net/docs/yarn-1.21+build.1/net/minecraft/client/texture/NativeImage.html>)，与本项目配置的 Yarn 基线对应；不拿 1.21.4/26.x 文档代替实际类 |
+
+A 还用 **C:/Program Files/Java/jdk-21.0.12.1/bin/javap.exe**（--system 同一 Java21）对实际 Loom 缓存 [named Minecraft JAR](<C:/Users/zhenz/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/neoforge-21.1.82-minecraft-merged/1.21.1-loom.mappings.1_21_1.layered+hash.426444933-v2-neoforge-21.1.82/neoforge-21.1.82-minecraft-merged-1.21.1-loom.mappings.1_21_1.layered+hash.426444933-v2-neoforge-21.1.82.jar>) 执行只读 `-p -c NativeImage`：writeTo(Path) 偏移 34–45 Files.newByteChannel，79–116 正常/异常均关闭 WritableByteChannel，异常关闭失败 addSuppressed；静态偏移 6–18 设置 WRITE/CREATE/TRUNCATE_EXISTING。故预先建空 payload 合法，返回后可以关闭后清理；此证据不等于 native 编码在实际客户端上已跑通。该方法还会抛 UnsupportedOperationException/分配状态错误，TWR 同样须清理，不仅考虑 IOException。
+
+**UNVERIFIED 交 D**：当前实际 classpath 与该缓存类的一致性（build 核对，不改构建）；C/R 驱动对新目录/写出/清理、junction 与 toRealPath 边界的实际结果；真实 NativeImage/LWJGL 可在无游戏进程中加载到何种程度；整个 NeoForge 生命周期运行时的实际注入效果。所有“构建/实测通过”必须由 D 新结果支持。
+
+### 12.8 仓库外 Java21 隔离验证策略（D 执行，A 不运行）
+
+**先证据与边界**：只读 git status/diff、HEAD；确认只有上述四源码＋计划。记录 Java/Javac 绝对路径/java.home/java.version；优先复用已有 C:/Program Files/Java/jdk-21.0.12.1，不调用 PATH 上 JDK25 代测。新建唯一 C:/Temp 外部任务目录保存 harness/stub/classes/报告；R:/Temp 仅在卷已存在且用户允许时放少量样本。无真实配置加载/写入，无仓库测试文件/.class，不能安装 JUnit/Mockito/依赖。
+
+**层 1：生产纯 JDK 生命周期**：核心虽嵌在 Image 中，但其方法体仅依赖 JDK。直接 javac `--release 21 -d 外部classes` 编译仓库**整份实际 Image 源码**＋外部最小 NativeImage/NativeImageBackedTexture stub；或者直接使用 build 编出的实际 Image 与其嵌套 class，先证明这些纯 JDK 方法可在不初始化 MC/native 的情况下加载。测试调用实际 `Image.TemporaryFile.create/close`，不手抄/抽取/替换核心源码逻辑。若 class 验证需要 MC 类型，则提供 stub 或真实编译 classpath，不把缺依赖冒充逻辑失败。stub 只为依赖边界服务，**不代表真实 MC/native 验证**。
+
+**层 2：实际 Image.writePNG 控制流**：同样编译原样生产 Image，而 NativeImage stub 的 writeTo(Path) 用固定小字节落盘，可按测试用例抛 IOException/RuntimeException、制造 payload 占用或任务目录内额外哨兵；stub 不是复制 Image 实现。调用实际生产 writePNG(OutputStream)，用检测 close/flush 的 OutputStream 与半途抛错流验证。对“编码失败＋cleanup 失败”用 stub 在 task 内创建一个外来小文件，然后抛指定原异常，cleanup 删除自己的 payload 后删空目录失败；断言同一原异常仍为 primary、suppressed 包含 task/payload、外来文件不删。额外文件只在外部样本，最后由 harness 显式收拾其自有哨兵，不伪造真实驱动失败。这个方法验证真实生产 TWR/归属代码，**不是实际 PNG 编码、内存释放或 native 文件句柄占用通过**。
+
+**层 3：实际配置解析和注入**：编译生产 [ReplayFoldersService.java](<src/main/java/com/replaymod/core/files/ReplayFoldersService.java>) 与 [Setting.java](<src/main/java/com/replaymod/core/Setting.java>)，外部 stub 提供 SettingsRegistry 的实际签名/内存 get、MinecraftClient 的临时 runDirectory、PercentEscaper 和 Utils.ensureDirectoryExists 的最小编译面；不调用真实 backend/真实配置路径，不替换这两份生产文件。以真实 service 方法提供 factory 并调用真实 Image 写出验证端到端路径；这些 stub 不是设置 watcher/游戏目录 API 实机验证。ReplayMod 构造器有大量真实副作用，不为跑一行 setter 启动 Backend；用源码/构建后 javap 核查一处实际注册与顺序，并单独用实际 Image+实际 service method reference 证明注入贯通。init 游戏实机仍未验收。
+
+**层 4：真实 MC/native 小样本（只在现有环境可行时）**：用 build 产出的实际 Image、实际 named NativeImage、现有 MC/LWJGL JAR 和匹配 natives 在**外部 Java21 进程**尝试 1×1/2×2 像素 writePNG(ByteArrayOutputStream)，只在 C:/Temp 或 R:/Temp 任务目录，不启动游戏、不加载 ReplayModBackend、不补下载/解压安装新 native、不改真实运行参数/配置。NativeImage 构造、STB 编码、RenderSystem/MemoryUtil/日志/MC bootstrap 依赖都是真实门槛，不可仅把 JAR 放 classpath 就承诺可以无游戏运行。若失败，记录真实异常链与依赖/初始化缺口，标记真实 MC/native=UNTESTED/BLOCKED；可以交付层1–3+build 的范围性证据，但**不能报告图片功能已游戏验收或 native 实测通过**。不得用 stub 产生的固定 PNG 字节冒充真实 MC 图片验证。
+
+### 12.9 D 最小用例矩阵、构建与停点
+
+| 用例 | 必须观察的结果/可接受缺口 |
+| --- | --- |
+| 空值/空白/默认 factory、注入前使用 | JDK 默认 temp 内任务独占、完成无 payload/task，未改 java.io.tmpdir；仅外部进程可用启动 `-Djava.io.tmpdir=C:\Temp` 约束样本位置，不动态改系统属性 |
+| 显式绝对 C/R、中文空格、根不存在 | 样本落到指定根下固定 payload；缺目录按约定创建，任务完成后 root 留存；R 没挂载则明确 SKIP 或安全失败，不模拟卸载真实 R |
+| 相对游戏目录、`..`、点路径 | MC stub runDirectory 与进程 cwd 不同，证明解析相对游戏目录；不删除根、其父或兄弟哨兵 |
+| 非法路径/Windows 盘相对/根相对、root 是文件 | IOException 含配置与阶段，无默认盘 fallback；不存在合法普通目录与不可用卷分别报告 |
+| 写入失败/复制失败/RuntimeException/cleanup-only | 本任务普通中间文件尝试清理；原异常不覆盖，suppressed 可定位；调用者流没 close/flush，可能部分输出需说明 |
+| factory 中途失败 | 代码审查每个分配边界；安全可模拟时验证 payload 创建后校验/清理出错。任务目录创建后、payload 创建前失败若无可靠外部注入法，标 UNTESTED，不为该项增加生产钩子或仅测手写复制版 |
+| 两任务并发/热重载/factory 替换 | 独占 task 不互删；已建旧句柄仍清旧根，新任务用新根；快照 factory 后用 latch 阻塞其 create、切换新 factory，释放后旧调用仍由旧 factory 返回句柄 |
+| 重复 close（含第一次失败） | 已终结句柄不再触盘，不删除该路径后来放入的样本；path() 拒绝关闭后再写 |
+| 外来子项/相似命名兄弟 | 只删本句柄确实拥有的 payload，非空 task 保留并报错，用户 root/兄弟/外来子项不动 |
+| symlink/junction 替换 | 在外部样本创建时只测试自己的目录，确认不进入目标、不删目标哨兵；权限不允许创建链接则 SKIP，不提权。纯符号链接通过不等于 junction 已测 |
+| 无权限/盘不可用/锁定文件 | 不修改真实盘/仓库 ACL，不卸盘、不灌满磁盘；可用外部占用可靠重现则记录，无法重现列 UNTESTED，不以 exists=false 假造权限通过 |
+
+1. 确认 `TemporaryFile` 无 MC/模组引用；Image 无 ReplayMod import/单例；旧四文件之外与第一批工具/caller 的 diff 为零。外部 harness 必须记录所编译生产源码路径（可加 SHA256），报告 actual-production + stub/real-native 的分层标签，不只给总 PASS 数。
+2. 专用 mc_gradle 必须用项目自带 wrapper，projectDir=`C:/Users/zhenz/Desktop/ReForgedPlay-1.21`；可先 task=`compileJava`, args=["-Djava.io.tmpdir=C:\\Temp"], timeoutMs=900000；最后必须 task=`build`, args=["-Djava.io.tmpdir=C:\\Temp","--console=plain"], timeoutMs=1200000。即用户要求的 **mc_gradle build -Djava.io.tmpdir=C:\Temp**。这是构建 JVM 参数，不是功能实现，不转为代码里的全 JVM设置。不要 clean、refresh-dependencies、-x test、改构建/依赖或安装包绕错。
+3. 记录真实构建退出/任务摘要、产物和警告；NO-SOURCE 不当成测试通过，旧 build 成功不替代本批新 build。工具/环境阻塞则如实报告，不用换栈或新增源码解围。
+4. 必须分别报告层1生命周期、层2生产写出+stub、层3生产服务+stub/注入静态核查、层4真实 native 的 PASS/FAIL/SKIP/UNTESTED；不能把 javap 和 build 等同游戏验收。清理失败位置与小样本遗留目录可保留定位，不自动清理历史任务。
+5. 若发现安全/异常/实际路径问题，交 Lead/C 在四文件内修订后重验；若不可能在白名单内满足则明确 BLOCKED、停问用户。通过可执行检查后展示 diff/限制，**第二批到此停下，等用户自行 commit**。不进入其他 temp 使用者/路径键/缓存清理，不 Git 写、不游戏启动、不改真实配置。
+
+A 本轮只修改本计划顶部与新第 12 节；未写源码、未构建、未编译 harness。当前可在四文件内实现，没有已证实的代码范围阻塞；真实 MC/native/游戏运行验证是未完成门槛，不把它藏在隔离 stub 的 PASS 后面。给 Lead 原样转告的一句话：这批省的是可丢弃的图片中间文件写入，失败时宁可留下可定位的小目录，也不扩大清理边界，更不拿 stub 的绿灯冒充游戏的绿灯。
+
+### 12.10 第二批真实结果与提交停点（Lead 复核）
+
+- 本批 A/B/C/D 顺序完成：B 增加框架但未接实际写出，C 完成四份源码功能，D 不改仓库文件，仅外部隔离验证和授权构建；第一批工具及 MarkerProcessor 无 diff。Lead 已回读实现、[D 完整报告](<C:/Temp/reforgedplay-D2-20261111-1219/REPORT.md>)、[主矩阵](<C:/Temp/reforgedplay-D2-20261111-1219/harness-rerun.log>)、[补充矩阵](<C:/Temp/reforgedplay-D2-20261111-1219/extra-harness.log>)、[实际 build 类探针](<C:/Temp/reforgedplay-D2-20261111-1219/pure-build.log>)、[构建回显](<C:/Temp/reforgedplay-D2-20261111-1219/build-mc_gradle-output.log>)及 [native 异常链](<C:/Temp/reforgedplay-D2-20261111-1219/native-probe-matching.log>)。
+- 生效范围：`advanced.tempPath` 默认空字符串，空白选择 JDK 默认临时根；非空值按原值解析，绝对路径直接使用、相对路径相对游戏目录。非完整 Windows 盘路径及非法路径明确失败，不静默回退。不修改全 JVM java.io.tmpdir，不修改实际游戏配置或 GUI 设置页。
+- 每次 `Image.writePNG(OutputStream)` 快照 factory 并创建独占 `.jgui-image-*` 任务及 `image.png`；写入/复制前检查边界，TWR 终结本任务。成功关闭后不留任务文件/目录；清理失败仅报告定位，不越过归属删除 root、哨兵、外来子项或链接目标。原异常保留，清理错误 suppressed；调用者流不 close、不 flush。File 重载与其他图片 API 不变。
+- **层1：生产 TemporaryFile 生命周期 13 PASS / 1 SKIP**，另有实际 build class、无 MC/stub classpath 的探针 PASS。C/R/default、中文空格、独占/无残留、重复 close、失败后 terminal、缺失任务、外来子项、NOSHARE_DELETE、junction 原位置换拒绝及 root 别名 canonical 化均实测。符号链接创建因权限跳过，不提权。
+- **层2：实际 Image 控制流＋外部 encoder stub 15 PASS**。验证字节复制、factory 单次 create/并发快照、默认注入前行为、两任务隔离、编码 IOException/RuntimeException/Error 原异常 identity、流失败、primary＋suppressed、cleanup-only 诊断及输出流生命周期、junction 编码前拒绝。stub 不代表真实 PNG/native 编码通过。
+- **层3：实际 folders/Setting＋外部依赖 stub 20 PASS**，真实 ReplayMod 源码/构建字节码核查 PASS。覆盖 blank、相对 mcDir、中文空格、C/R、非法/盘相对路径、不 trim 非空原值、单次 get、设置变化只影响新任务、错误不回退、service method reference 实际贯通。只读确认构造器在 folders 初始化后、I18n/模块之前注册一次，不启动真实 Backend/watcher。
+- 主矩阵最终 **44 PASS / 0 FAIL / 1 SKIP**，补充 **4 PASS / 0 FAIL**；以上分层统计已包含补充，不能再重复相加。首轮外部 harness 错把 Windows 目录段尾随空格当合法输入，生产正确拒绝；D 只修测试预期并保留旧记录，未改生产源码掩盖失败。主矩阵日志含非法路径样本 NUL，通用 read 会判二进制，Lead 用原生 UTF-8 文件检查工具逐行回读而未修改原始证据。
+- **层4：真实 Minecraft/native PNG 未验收**。匹配现有缓存依赖、真实 build Image＋named NativeImage 的独立 Java21 探针在 NativeImage 构造时报 `UnsatisfiedLinkError: Failed to locate library: lwjgl.dll`，未进入 PNG 编码。没有补下载/解压安装 native、没有启动游戏。此结果是独立探针环境受阻，不是已证实的游戏加载失败，也绝不是 native 编码通过。
+- 指定 Oracle Java/Javac/Javap 21.0.12.1；专用 mc_gradle task=build，参数 `-Djava.io.tmpdir=C:\Temp --console=plain`：**BUILD SUCCESSFUL in 53s；6 actionable tasks: 4 executed, 2 up-to-date**。未 clean、refresh 或跳测试；NO-SOURCE 不是 JUnit 通过。仅工具文本未提供 exitCode/timedOut 数值，不虚构；已核对真实 UTF-8 daemon 日志。保留既有旧 API/Loom/Gradle 弃用及 JOML/WorldRenderer Mixin 重映射提示，未越界修复。
+- **仍未测**：task 已分配至 CREATE_NEW payload 之间的可靠冲突与该时点 allocation cleanup suppressed、ACL 拒绝、满盘、卷消失、真实 watcher/Backend/游戏生命周期及真实 native 编码。未拥有 payload 时不删外来文件已作源码/字节码审查，不能称动态故障覆盖。路径检查仍依赖可信父目录，不承诺排除全部 TOCTOU；断电/进程崩溃可能留下临时目录，本批不加扫描清理。
+- 仓库交付仅本计划及 [Setting.java](<src/main/java/com/replaymod/core/Setting.java>)、[ReplayFoldersService.java](<src/main/java/com/replaymod/core/files/ReplayFoldersService.java>)、[Image.java](<src/main/java/de/johni0702/minecraft/gui/versions/Image.java>)、[ReplayMod.java](<src/main/java/com/replaymod/core/ReplayMod.java>)，无新增源码文件，不改依赖/实际配置/仓库测试/第一批代码，不执行 Git 写操作。源码差异为 Setting +1、Folders +31、Image +225/-6、ReplayMod +2，计划统计随验证记录增加。
+- 输出 [正式 JAR](<build/libs/reforgedplaymod-1.21.1-0.3.1.jar>)；D 记录体积 17418352 字节、SHA-256 `410a30fde49536ce275ec1cc8992b9e4ff75ad5f8be1e05575679e3749fd7aea`。本批交付是源码/隔离控制流/构建检查点，不是全游戏可用性签字。
+- 配置示意（不是实际文件修改）：在现有 advanced 对象合并 `"tempPath": "R:/ReForgedPlay/temp"`，或 `"tempPath": "./replay_temp"`；空值保留默认位置。不覆盖其他设置，不把它理解为所有模组/所有临时写入都被接管。本批仅图片流输出中间文件，其他 temp 使用者留后续独立批次。
+- 仓库外证据约 0.7MiB，R 侧仅保留测试哨兵16字节及空根目录，无 `.jgui-image-*` 任务残留；测试 junction 已移除。证据保留，代理不擅自清理其他缓存。**第二批到此停止，等待用户自行 commit；不自动进入后批。**
+
+D 原话：测试的绿灯只照到确实跑过的边界；这次没有用 stub、成功构建或被保留的小哨兵，替真实游戏和 native 编码签字。

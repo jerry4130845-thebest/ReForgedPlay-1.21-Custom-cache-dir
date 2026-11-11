@@ -3,11 +3,13 @@ package com.replaymod.core.files;
 import com.google.common.net.PercentEscaper;
 import com.replaymod.core.Setting;
 import com.replaymod.core.SettingsRegistry;
+import de.johni0702.minecraft.gui.versions.Image;
 import net.minecraft.client.MinecraftClient;
 
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 
 import static com.replaymod.core.utils.Utils.ensureDirectoryExists;
@@ -18,6 +20,35 @@ public class ReplayFoldersService {
 
     public ReplayFoldersService(SettingsRegistry settings) {
         this.settings = settings;
+    }
+
+    /**
+     * Creates one image task from a single TEMP_PATH setting snapshot. Blank means JDK
+     * default temp; relative paths resolve against mcDir, never the process cwd.
+     * Invalid/drive-relative paths and IO failures must fail without a fallback.
+     * The returned handle owns only its private task directory and image.png.
+     */
+    public Image.TemporaryFile createImageTempFile() throws IOException {
+        String configured = null;
+        Path root = null;
+        String phase = "read setting";
+        try {
+            configured = settings.get(Setting.TEMP_PATH);
+            if (configured != null && !configured.isBlank()) {
+                phase = "parse setting";
+                root = Path.of(configured);
+                if (!root.isAbsolute() && root.getRoot() != null) {
+                    throw new IOException("Drive-relative or root-relative tempPath is not supported");
+                }
+                phase = "resolve against game directory";
+                root = mcDir.resolve(root).toAbsolutePath().normalize();
+            }
+            phase = "create image task";
+            return Image.TemporaryFile.create(root);
+        } catch (IOException | InvalidPathException | UnsupportedOperationException | SecurityException failure) {
+            throw new IOException("Cannot create temporary image; tempPath=" + configured
+                    + "; phase=" + phase + "; resolved root=" + root, failure);
+        }
     }
 
     public Path getReplayFolder() throws IOException {
