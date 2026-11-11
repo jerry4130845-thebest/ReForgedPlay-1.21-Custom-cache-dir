@@ -1,6 +1,7 @@
 package com.replaymod.editor.gui;
 
 import com.replaymod.core.ReplayMod;
+import com.replaymod.core.files.ReplayFileOperations;
 import com.replaymod.core.versions.MCVer;
 import com.replaymod.replaystudio.PacketData;
 import com.replaymod.replaystudio.data.Marker;
@@ -21,7 +22,6 @@ import org.apache.commons.lang3.tuple.Pair;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -130,11 +130,7 @@ public class MarkerProcessor {
         List<Pair<Path, ReplayMetaData>> outputPaths = new ArrayList<>();
 
         Path rawFolder = ReplayMod.instance.folders.getRawReplayFolder();
-        Path inputPath = rawFolder.resolve(path.getFileName());
-        for (int i = 1; Files.exists(inputPath); i++) {
-            inputPath = inputPath.resolveSibling(replayName + "." + i + ".mcpr");
-        }
-        Files.move(path, inputPath);
+        Path inputPath = ReplayFileOperations.moveToRaw(path, rawFolder);
 
         try (ReplayFile inputReplayFile = mod.files.open(inputPath)) {
             List<Marker> markers = inputReplayFile.getMarkers().or(HashSet::new)
