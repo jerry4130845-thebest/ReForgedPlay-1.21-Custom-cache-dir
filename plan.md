@@ -1,6 +1,6 @@
 # ReForgedPlay 自定义目录与 RAMDisk 支持计划
 
-> 状态：第一批基线为用户提交 9762f30。第二批已完成 A→B→C→D 和 Lead 日志/代码复核，限定为普通 tempPath、图片中间文件生命周期及 Image factory 注入，停在源码/隔离控制流/构建检查点等待用户自行 commit。**真实 Minecraft/native PNG 编码与游戏内验收仍未完成**：独立 native 探针在构造阶段因找不到 lwjgl.dll 停止。第 12.10 节记录真实结果和限制；第 12 节是本批唯一白名单，第 11 节为已提交历史，第 3–10 节为长期路线，不自动进入后批。代理未执行 Git 写操作。
+> 状态（第三批重规划，Lead 已复核）：用户确认前两批已提交；本轮只读核实 HEAD=2903157，规划前工作区 clean。第三批**仅授权规划，未授权源码实施、测试或构建**，新第 13 节是待确认候选，不是实施白名单。此前被停止、无 closing report 的第三批委派不视为完成。本轮只更新本顶部与第 13 节，保留第 1–12 节为历史；第 12 节“等待提交”等文字不再代表当前提交状态。第二批真实 MC/native PNG 与游戏验收缺口依然保留。第三批完整目标因资源包真实释放确认尚未闭合而 BLOCKED，不能把 clear()/网络 close()/加载 future 当作 ZIP 已释放。未写源码、未构建、未编译测试、未 Git 写或启动游戏。
 > 用户目标：独立配置 cache、raw、temp、tmp、record 等目录，支持绝对路径及相对于游戏目录的路径；将可丢弃缓存和临时文件放在 RAMDisk，用完清理，减少实体硬盘写入。没有已报告故障，本次属于预防性兼容与容错设计。
 
 ## 1. 项目基线与证据边界
@@ -489,3 +489,115 @@ A 本轮只修改本计划顶部与新第 12 节；未写源码、未构建、�
 - 仓库外证据约 0.7MiB，R 侧仅保留测试哨兵16字节及空根目录，无 `.jgui-image-*` 任务残留；测试 junction 已移除。证据保留，代理不擅自清理其他缓存。**第二批到此停止，等待用户自行 commit；不自动进入后批。**
 
 D 原话：测试的绿灯只照到确实跑过的边界；这次没有用 stub、成功构建或被保留的小哨兵，替真实游戏和 native 编码签字。
+
+## 13. 第三批重规划：资源包 ZIP 接 tempPath 与真实释放（仅规划，待用户确认）
+
+### 13.1 授权、基线与结论
+
+- **仅授权 A 规划，当前源码白名单为空；以下均为候选。** 本轮唯一文件写入是本计划顶部与本节。未实施、构建、测试、装包、改配置/依赖/.env、Git 写、游戏启动或接触 whale-craft。前次被停止、无 closing report 的第三批委派不视为完成。
+- 核实记录：本轮按实际工作区与提交核查，不将代理推断的日期/时区当成用户提供的信息。只读 HEAD=`2903157`；规划前 git status --short 无输出。前两批已提交为用户确认；本轮不读实际设置内容，不改设置。
+- 先识别时代：[build.gradle](<build.gradle#L1-L11>) 为 Architectury Loom `1.7-SNAPSHOT`、Java21；[gradle.properties](<gradle.properties#L6-L20>) 为 MC1.21.1、NeoForge21.1.82，Yarn1.21+build.1 加 Architectury layered patch；[metadata](<src/main/resources/META-INF/neoforge.mods.toml>) 为 neoforge.mods.toml，[wrapper](<gradle/wrapper/gradle-wrapper.properties#L3>) 为 Gradle8.8。现代 Java21 线，保持现有栈，不 scaffold、不改 ModDevGradle、不升级。实际 javap -version 为21.0.12.1，不用 PATH 上其他 JDK。
+- 技能边界：A 本轮未加载技能正文，不声称加载成功。Lead 已在恢复任务时加载 minecraft-java-build 与 minecraft-neoforge-mod，并核对既有 Loom/Java21/NeoForge 栈；不把技能的新项目模板用于本项目。API 判断以本项目 named JAR 字节码为依据，Lead 也已复核 Loader 的方法签名与转发逻辑。
+- **结论：双流 TWR、complete-only ZIP 发布、多 ZIP 与路径快照可以小范围设计；完整“接 tempPath＋播放保留＋真实释放后清理”仍 BLOCKED。不能证明两源码足够；申请 ReplayHandler 第三源码也不自动得到资源释放确认。** 不先写代码再用 stub 掩盖缺口。
+
+### 13.2 聚焦源码事实（本轮只读）
+
+| 源码证据 | 行为与影响 |
+| --- | --- |
+| [FullReplaySender 字段/构造器](<src/main/java/com/replaymod/replay/FullReplaySender.java#L270-L288>) | L274 字段初始化 Files.createTempDir 早于主体；L285 元数据读取、L287 事件注册可失败，任务分配不能在构造失败时失去归属。 |
+| [资源包分支](<src/main/java/com/replaymod/replay/FullReplaySender.java#L605-L635>) | L623 拼 hash.zip，L624 仅 exists 判断，L625 IOUtils.copy 的输入和输出均未显式关闭，L628 排队 add。半写 ZIP 会被下次误当完成；hash 未校验是路径输入。这里抽取整个 ZIP，不解 ZIP entries，不新增通用 unzip。 |
+| [调度](<src/main/java/com/replaymod/replay/FullReplaySender.java#L1317-L1331>) | schedulePacketHandler 主线程直接执行，否则 mc.execute，返回 void，无撤销/完成句柄。必须在 runnable 真执行时再查 terminal/generation，不能只在入队时检查。 |
+| [终止](<src/main/java/com/replaymod/replay/FullReplaySender.java#L350-L364>) | if terminate return → syncSender.shutdown → events.unregister → pipeline inactive/close → deleteDirectory。没有 worker 完成、MC 卸载或重载完成屏障；网络关闭不是文件释放。共用 try 前项失败还可能跳过后项。 |
+| [模式切换](<src/main/java/com/replaymod/replay/FullReplaySender.java#L300-L330>) | terminate 同时控制 async 停机：切 sync 置 true，切 async 又置 false；不能当永久关闭幂等标记，否则切 sync 后终止可能直接返回，关闭后又可复活。 |
+| [async](<src/main/java/com/replaymod/replay/FullReplaySender.java#L994-L1109>) / [sync](<src/main/java/com/replaymod/replay/FullReplaySender.java#L1177-L1289>) | async 持 sender monitor，restart 使用 runSync；sync submit 后主线程 drain 队列。shutdown 不等待已排队任务；主线程 join/awaitTermination 或持 monitor 等 MC future 易死锁。autoRead 等待也需关闭退出边界。 |
+| [ReplayHandler 构造/重启](<src/main/java/com/replaymod/replay/ReplayHandler.java#L195-L242>) | sender 构造后 quick sender/setup/overlay/opened callback 仍可失败；restartedReplay 是 seek 的同 sender 重建，close channel→disconnect→setup，不是最终退出，不可删除整个 sender ZIP。 |
+| [endReplay](<src/main/java/com/replaymod/replay/ReplayHandler.java#L244-L293>) | closing callback→sender terminate→ReplayFile save/close→channel close await→world 非空才 disconnect→closed callback。当前删 ZIP 早于 disconnect；callback/save/close 失败可跳过卸载；world null 不等于无资源包。ReplayFile 所有权在 handler，sender/helper 不关它。 |
+| [setup](<src/main/java/com/replaymod/replay/ReplayHandler.java#L405>) | provider.init(networkManager, ALLOWED) 在新连接建立时执行，旧卸载回调不得清除新连接的资源。 |
+| [现有 tempPath](<src/main/java/com/replaymod/core/files/ReplayFoldersService.java#L25-L52>) | 图片入口已有 default/绝对/游戏相对/失败不回退语义；资源包入口独立复用语义，不借固定 image.png 的 Image.TemporaryFile，不重构前两批。 |
+| [hash 来源](<src/main/java/com/replaymod/recording/packet/ResourcePackRecorder.java#L83-L106>) | recorder 使用 SHA1 hex；读取端仍不信任回放 index。 |
+
+### 13.3 实际 named MC JAR 与 Java21 API 证据
+
+本轮使用 **C:/Program Files/Java/jdk-21.0.12.1/bin/javap.exe** 的 -p -c，指向 [实际 named MC JAR](<C:/Users/zhenz/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/neoforge-21.1.82-minecraft-merged/1.21.1-loom.mappings.1_21_1.layered+hash.426444933-v2-neoforge-21.1.82/neoforge-21.1.82-minecraft-merged-1.21.1-loom.mappings.1_21_1.layered+hash.426444933-v2-neoforge-21.1.82.jar>)，不是 intermediary/mojang JAR。先按 ServerResourcePackProvider 猜类名得到 class not found，随后同 JDK jar tf 核实：实际是 **net.minecraft.client.resource.server.ServerResourcePackLoader**，MinecraftClient.getServerResourcePackProvider() 返回它。保留该纠正，不能根据 getter 名猜类型。
+
+| 方法 / 字节码 | 可证明与不能推论的内容 |
+| --- | --- |
+| Loader.addResourcePack(UUID, Path): **void**，偏移0–9 转发 manager | 仅提交路径，不返回加载/卸载 future，manager PackEntry 保留 path；不意味着 MC 已复制到自己的文件。 |
+| Loader.remove(UUID)、removeAll(): **void** | 无释放确认；只移除 lease 登记的 UUID，不能为本任务调用全局 clear/removeAll 干扰别的包，UUID 重用须有代次归属。 |
+| Loader.clear(): **void**，0–7 manager.removeAll，7–14 换 callback，14–21 resetAcceptanceStatus | 不是关闭 ZIP；还会替换 getPackLoadFuture 的观察 callback 链。 |
+| Loader.close(): **void throws IOException**，0–7 仅 downloader.close | 是下载器关闭，不是 active packs 释放屏障；不能关闭 MC singleton loader 来清本任务。 |
+| Loader.getPackLoadFuture(UUID): CompletableFuture<Void>；Loader$7.onFinish：22–38 仅 APPLIED 正常 complete，41–68 其他 finish exceptionally | **有加载 future，但不是卸载 future**。APPLIED 时正在使用，不能删除；不能拿 clear 后这个 future 推断释放。 |
+| Loader.reload(ReloadContext): void，63–71 换 packProvider，71–79 调 mc.reloadResources 后 pop | MC 有重载 future，但 loader 丢弃返回值，没有直接给调用者的 per-lease 卸载句柄。 |
+| Manager.update/applyDownloadedPacks；ReloadScheduler.scheduleReload(ReloadContext): void | remove 标记、manager update、安装排除旧包的 context、reload 是不同步骤；PENDING 可延迟。不能 remove 后随手 mc.reloadResources 就假定 provider 已排除旧路径。 |
+| MC.reloadResources(): CompletableFuture<Void>；私有方法0–11 可直接返回已有 resourceReloadFuture；24–40 SplashOverlay 时排后续 | 任意重载 future 完成不等于 remove 之后正确一轮完成，必须有因果关联与旧/新代次屏障，不能裸 clear().thenRun，clear 本来就是 void。 |
+| MC lambda$reloadResourcePacks$20：14–21 loader.onReloadSuccess，21–26 complete；Loader.onReloadSuccess：7–16 context.onSuccess | 有成功回调链，但公开 API 未返回本 lease 专属卸载确认。 |
+| ReloadableResourceManagerImpl.reload：20–29 activeManager.close，再建新 manager；close():0–9 activeManager.close | 这才有实际资源管理器 close 调用。仍需证明 ZIP pack close 链、在途 reader 退出、旧 provider/待加载任务不能重开；仅看到 close 调用不能宣称全部句柄释放。 |
+| MC.disconnect(Screen,boolean) 仅有 network handler 且非重配置时调用 onDisconnected；onDisconnected:0–7 loader.clear，7–11 runTasks，均 void | disconnect 返回不是资源重载/文件释放屏障；无 world、异常和 seek 独立覆盖。 |
+
+可复查本轮 [Loader/Manager javap 回显](<R:/Temp/dsh-subprocess-e8qBMh/dsh-subprocess-21728-1-5e6fdff64365-stdout.log>) 与 [MC reload/disconnect javap 回显](<R:/Temp/dsh-subprocess-e8qBMh/dsh-subprocess-21728-2-35e2da8f57f4-stdout.log>)；Loader$7 与 ResourceManager 为本次另一只读工具调用的完整对话结果，未另存报告。spill 为工具临时证据，持久复查依据是上面精确 JDK/JAR/类/方法/偏移。本轮无手工仓库外写入。
+
+Web 辅助证据：[Yarn1.21+build.1 Loader JavaDoc](<https://maven.fabricmc.net/docs/yarn-1.21+build.1/net/minecraft/client/resource/server/ServerResourcePackLoader.html>)，2026-11-12 搜索后抓取 HTTP200，签名与实际 void / getPackLoadFuture 一致；这是配置映射基线，不是另版本或 actual NeoForge 执行证明，实际 bytecode 优先。
+
+**BLOCKED/UNVERIFIED 组合屏障：** 本 lease 全部 path/UUID 已由 manager/provider 排除，正确 reload 已关闭旧 packs，所有旧 reload/context/排队 add 不会重开，异步 reader 已释放。Windows delete 成功不能反证没有异步读者，Unix 可 unlink 更不是关闭证明。第三源码只修生命周期接线，不填补该 API 缺口。
+
+### 13.4 最小可实现阶段与停点
+
+**A3 本轮：出本计划后停下。** 不让 B/C 默认先动两文件；用户先选完整目标继续取证/白名单，或明确接受缩批。
+
+**B3 未来授权后，先证据 gate 再 skeleton：** 定点复核本 JAR 的 manager remove/context 更新、正确重载关联和 packs/reader close 链；只用公开 API＋三源码能证明才提交具体时序。证明不了停问 Lead，提出精确 hook，不写“应该已释放”，不扩研究到其他版本/目录。获批后 skeleton 定义窄 lease/terminal/generation 契约，不能用 completedFuture 假装 MC release。
+
+**C3 完整方案仅在 gate 和白名单均获批后：**
+
+1. 新资源包任务入口一次读取 advanced.tempPath；blank/null 为 JDK 默认根，非空保留原字符串、不 trim/展开环境变量，绝对/游戏相对和错误诊断复用现有语义。每 sender 一次快照，建议必要元数据读取成功后再分配（可延迟实际建目录，但配置不可每 ZIP 重读）；seek 不换根。同 sender 多 ZIP 共一个独占任务，用户 root 不是 lease。
+2. lease 为窄纯 JDK 嵌套类型候选，登记自身 staging/ZIP；不用 Image.TemporaryFile，不改全局 java.io.tmpdir，不依赖 FileStore/DOS/fileKey，不建泛化框架，不改图片 factory。
+3. hash 严格40位 ASCII hex（大小写规范明确），先拒绝路径分隔符、冒号、点段/绝对/盘相对；resolve normalize 后必须为任务直接子文件。missing index/id/Optional absent 明确失败不加载，不信任回放输入。内容可按 SHA1 校验以拒绝 index/bytes 不匹配，但这不等于 MC metadata 验收。
+4. 每 hash 独占 CREATE_NEW staging；输入、输出均 TWR，输出先关输入后关，绝不关 ReplayFile。copy/flush/close 任一失败都不可 READY/排队。双流成功关闭并验证后同目录 move 到完成名，不覆盖外来文件；不强制原子 move 或静默跨根回退，无发布前 MC 观察者。成功后才记 in-memory READY，exists 不算完成；同 hash 串行或共享单次结果，失败可重试不复用半文件。两 hash、多 UUID 保持独立。
+5. 独立永久 terminal，不再复用 async terminate；设计 ACTIVE→STOPPING→WAIT_RELEASE→RELEASED→CLOSED/cleanup-failed，带 packet/session generation 和 in-flight producer/add 计数。stop 后不新增 path/MC add，排队 runnable 执行时查 terminal/generation/当前 sender；关闭后 setAsyncMode/sendPacketsTill 不可复活。锁/计数不跨 MC 等待，主线程不得 join/await 死锁。
+6. seek 提升 packet generation 令旧排队 add 失效，但保留同 sender ZIP；旧代次已提交加载仍是 release 债务，最终屏障须全部覆盖。旧清理回调不能 remove 新包，两个 sender/回放不能互删。
+7. handler 最小接线涵盖构造中 sender 创建后的失败、正常 end、early restriction terminate、world null、callback/save/close 失败与 seek。先停止新工作，再协调卸载，保留 ReplayFile 原有所有权，不重写保存体系。未向 MC 提交且无在途写的任务可受控清理；已提交的必须等释放 gate，catch/finally 不盲删。原异常保留，清理/卸载失败定位并 suppressed/日志，不让前项失败静默跳过终结请求。
+8. **删除条件同时成立：** terminal、全部生产者退出、排队 add 失效且在途 add 完成、全部已提交路径/UUID 的正确卸载重载已确认且异步引用不再重开。只删登记普通 staging/ZIP，再删空 task；不递归扫用户 root/历史目录/兄弟/外来子项，不跟 links。触盘校验真实边界，symlink/junction 置换失败保留，不把可信父目录检查夸大为彻底 TOCTOU 防护。
+9. release 异常/取消/悬挂/关联不明则 WAIT_RELEASE＋诊断，不删、不报完成；cleanup 失败留可定位本任务文件，重复终结不得删同路径后来放入的新文件。不增加启动扫描、deleteOnExit/GC/Cleaner/finalize 替代释放。失败保留是容错，不是偷偷取消清理承诺，缺 gate 则完整目标 BLOCKED。
+
+**可选缩批 S（必须用户另行明确批准）：** 仅 [FullReplaySender.java](<src/main/java/com/replaymod/replay/FullReplaySender.java>) 的读取 hash/path 校验、双流 TWR、complete-only ZIP 发布/复用；不接 tempPath，不新增/加快删除，明确保留原 terminate 的安全风险，不称“清理已安全”。更小可选仅双流 TWR，不改其他语义。缩批均不满足本次完整目标；若用户要求本批必须真实释放后清理，就不走缩批，保持阻塞。
+
+### 13.5 精确候选源码与文件归属（全部待确认）
+
+| 文件 / 范围 | B skeleton | C content | D review / 授权状态 |
+| --- | --- | --- | --- |
+| [plan.md](<plan.md>) 顶部与第13节 | 只读 | 只读，方案变更交 Lead | A 本轮唯一写者；后续 D 结果经 Lead 授权补录 |
+| [ReplayFoldersService.java](<src/main/java/com/replaymod/core/files/ReplayFoldersService.java>) | 资源包 task factory/窄嵌套 lease 契约 | 快照、受控归属、非递归清理 | 完整方案候选；现有图片方法 diff 为零 |
+| [FullReplaySender.java](<src/main/java/com/replaymod/replay/FullReplaySender.java>) | terminal/generation/lease 契约 | 多 ZIP/TWR/发布、排队 add 防陈旧、生产者终止与释放协调 | 完整或缩批候选，范围不同，不默认授权 |
+| [ReplayHandler.java](<src/main/java/com/replaymod/replay/ReplayHandler.java>) | 构造失败/seek/最终关闭接线 | 关闭与 MC 卸载时序、错误不跳终结 | **申请第三源码理由**：sender 看不到 setup 后失败、endReplay 中断/无 world 路径及 seek vs 最终关闭；必须用户批准，增加它不保证 gate 已解决 |
+| 尚不存在的候选顶层 `src/main/java/com/replaymod/core/files/ReplayResourcePackLease.java` | 不创建 | 仅嵌套 lease 难以隔离验证时先申请 | 非白名单，优先三源码内窄嵌套；不为测试擅自加文件 |
+| 尚不存在的候选 `src/main/java/com/replaymod/core/mixin/Mixin_ReplayResourcePackRelease.java` 及现有 [mixins.core.replaymod.json](<src/main/resources/mixins.core.replaymod.json>) | 不创建/不编辑，先给精确方法/注入点 | 公开 API 无法闭合 gate 时再申请 | **不属三源码提案，不保证此一个 hook 足够**；需证明观测“排除本路径后那一轮”，不是任意 onReloadSuccess，不申请无限权限 |
+| 其他源码/图片/第一批工具、Setting、ReplayMod、构建/依赖/metadata/配置/.env/仓库测试 | 全只读 | 全只读 | D 不修源码，问题交 C/Lead 在获批范围修 |
+
+后续严格 A→用户确认→B→C→D：A 已交证据与阻塞；B 先闭合 gate，再在选定白名单做 skeleton；C 实施已批准切片；D 另行获准后做外部验证与构建，只读审查仓库，不默认有修复权限。未选方案前不启动 B/C/D。
+
+### 13.6 后续 Java21 外部隔离验证与游戏缺口（本轮未执行）
+
+- 匹配 Oracle Java/Javac/Javap21.0.12.1 绝对路径；未来另经授权在唯一 C:/Temp 外部任务存 harness/classes/report，不写仓库测试、不装包；R 样本仅卷已存在且用户允许。编译/加载**真实生产 lease 代码**，MC 外部 stub 仅补依赖面，不复制手写生产实现代测。
+- 纯 JDK：default/绝对/游戏相对/中文空格/热更新单次快照、不合法盘相对/不可用根无 fallback；两个 sender/同 sender 多 ZIP、同 hash 复用、缺 index/流、恶意 hash；copy/close/move 失败不可 READY，半写重试、输入输出 close 计数、ReplayFile 不关。
+- 受控清理：构造前/后失败、重复终止、cleanup 失败后同路径新文件、外来哨兵/兄弟/未知历史目录、symlink/junction 置换、可可靠制造的 Windows NOSHARE_DELETE；root/外来文件不删。ACL/满盘/卷消失不能改真实环境强测，无法复现标 UNTESTED。
+- 控制流：可控 executor/latch/future 验证写中终止、add 排队/执行中终止、seek 后旧 add、切 sync 后结束、关闭后再切 async/submit、多 UUID/旧 reload 晚完成、release 失败/取消/永不完成。gate 之前 ZIP 必须保留，生产者退出且正确 gate 后才清；stub future 只能证明本模组控制流，不能证明 MC 具有该 gate。
+- 字节码：复核实际编译 classpath 与上述缓存 JAR，一致性未由本轮构建证明。javap/static 证据不等于实际关闭 reader，不能先用 stub 补 gate 再报完成。
+- **真实 MC 验收另经授权**：至少两个不同 ZIP 的回放，async/sync/seek/quick/重配置、加载中退出、正常结束、构造/回调失败、无 world 退出、新 replay 紧跟旧 replay、同时手动重载及重载失败恢复。观察播放可用、全部旧 provider/reader/句柄释放后才清自有 ZIP/空 task，其他包/哨兵不动。不能用 stub、delete 成功、固定延时、网络关闭或 build 成功代验收。本轮禁止启动游戏，此层明确 **UNTESTED/BLOCKED**。
+- **仅供未来用户授权 D 的构建步骤**：mc_gradle 使用本项目 wrapper，projectDir=`C:/Users/zhenz/Desktop/ReForgedPlay-1.21`；可先 task=compileJava timeoutMs=900000；最终 task=build args=["-Djava.io.tmpdir=C:\\Temp","--console=plain"] timeoutMs=1200000。不 clean/refresh-dependencies、不改栈、不 -x test，NO-SOURCE 非测试通过。本轮规划授权不包括执行，旧批 build 不替第三批结果。
+
+### 13.7 风险、用户选择与关闭报告
+
+1. **首要阻塞是没有已验证的 per-lease 卸载/释放屏障。** 加载 future 不等于释放，loader clear/close 不等于 active pack close；三源码接线仍要先补证明，若须新 helper/mixin/配置必须再申请。
+2. terminal 与 async terminate 混用、shutdown 不等完成、主线程 runSync/drain 死锁、旧 add/reload 穿越 seek/session 均必须处理，不能为维持“两文件”数字假装不存在。
+3. 保留多 ZIP、单 sender 根快照、半写不复用、不关不归己 ReplayFile、无全局 tmp/回退、无 FileStore/DOS/fileKey 硬依赖、受控非递归清理是硬边界；没有释放证明只能保留诊断，不能宣称已实现即时清理。
+4. 环境固定 Java21/Loom1.7/NeoForge21.1.82；未读真实设置、未新构建/测试。现有 [ReplayStudio JAR](<libs/ReplayStudio-master-SNAPSHOT-slim.jar>) 不改/不替换，不为本批扩展依赖或其他存储事务。
+5. 请用户选择：**完整目标保持阻塞，授权定点释放证据及三源码候选审查**；或**明确接受缩批 S 的有限效果和遗留风险**。没有选择就停，不默认进入下一阶段。
+
+A closing report：本计划已落盘，本轮仅规划；已准确区分 void / 加载 future / MC 重载 future，完整实现与游戏验收均未完成。给 Lead 原样转告：宁可把释放边界写成阻塞，也不把删得掉文件冒充 Minecraft 已经用完。
+
+### 13.8 Lead 复核与本轮规划停点
+
+- Lead 已回读第13节、复核真实 Loader javap 回显（包括 clear 的 removeAll/回调重设与 close 仅关闭 downloader），与 endReplay/发送器排队源码交叉核对。确认当前缺的是与本任务卸载因果关联的释放证明，不是声称 Minecraft 没有任何资源关闭机制。
+- 修正了 A 未获用户提供却写成“用户提供”的日期/时区归因；技能加载由 Lead 完成，不冒称 A 已加载。
+- 本轮交付仅计划；git status/diff 核实业务源码、IDE配置、依赖、测试均未改动。文档检查运行 git diff --check；没有新 Java 代码，因此不复用第二批 build 当第三批验证，也不声称运行过第三批测试。
+- 建议下一步继续定点只读取证，先给出可证明的释放接入点和准确文件范围；若用户更重视立即交付，可明确选缩批 S（甚至仅双流 TWR），但必须承认它不实现 tempPath 和安全即时清理。当前不默认选缩批，不将候选源码列成已授权。
+- 本轮 A 规划目标完成，业务实现未完成。停在方案选择/文件范围确认之前，不启动 B/C/D，不执行 Git 写操作。
