@@ -1,18 +1,13 @@
 package com.replaymod.render.metadata;
 
-import com.coremedia.iso.IsoFile;
-import com.coremedia.iso.boxes.*;
-import com.google.common.primitives.Bytes;
-import com.googlecode.mp4parser.BasicContainer;
+import com.replaymod.core.ReplayMod;
 import com.replaymod.render.RenderSettings;
 import de.johni0702.minecraft.gui.utils.lwjgl.Dimension;
-import org.apache.commons.io.FileUtils;
-import org.apache.commons.io.IOUtils;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 
 import static com.replaymod.render.ReplayModRender.LOGGER;
 
@@ -58,9 +53,25 @@ public class MetadataInjector {
             (byte)0x02, (byte)0x52, (byte)0x1f, (byte)0xdd
     };
 
+    /** Compatibility best-effort facade. Logs are NOT a metadata success receipt. */
     public static void injectMetadata(RenderSettings.RenderMethod renderMethod, File videoFile,
                                       int videoWidth, int videoHeight,
                                       int sphericalFovX, int sphericalFovY) {
+        try {
+            VideoMetadataTask.Result result = injectMetadataWithResult(renderMethod, videoFile,
+                    videoWidth, videoHeight, sphericalFovX, sphericalFovY);
+            if (!result.metadataPresent() || !result.cleanupDiagnostics().isEmpty()) {
+                LOGGER.warn("Spherical metadata best-effort result: {}", result);
+            }
+        } catch (IOException | RuntimeException failure) {
+            LOGGER.error("Spherical metadata best-effort facade failed; no success receipt", failure);
+        }
+    }
+
+    /** Project-owned explicit receipt API; caller must establish writer readiness. */
+    public static VideoMetadataTask.Result injectMetadataWithResult(
+            RenderSettings.RenderMethod renderMethod, File videoFile,
+            int videoWidth, int videoHeight, int sphericalFovX, int sphericalFovY) throws IOException {
         String xmlString;
         switch (renderMethod) {
             case EQUIRECTANGULAR:
@@ -74,9 +85,13 @@ public class MetadataInjector {
         }
 
         Dimension original = getOriginalDimensions(videoWidth, videoHeight, sphericalFovX, sphericalFovY);
-        writeMetadata(videoFile, String.format(xmlString,
+        String metadata = String.format(xmlString,
                 original.getWidth(), original.getHeight(), videoWidth, videoHeight,
-                (original.getWidth() - videoWidth) / 2, (original.getHeight() - videoHeight) / 2));
+                (original.getWidth() - videoWidth) / 2, (original.getHeight() - videoHeight) / 2);
+        Path selectedTempRoot = ReplayMod.instance.folders.snapshotVideoMetadataTempRoot();
+        // UserBox(userType=UUID16), data=XML only; never prefix the UUID to XML data.
+        return VideoMetadataTask.apply(videoFile.toPath(), selectedTempRoot,
+                UUID_BYTES.clone(), metadata.getBytes(StandardCharsets.UTF_8));
     }
 
     private static Dimension getOriginalDimensions(int videoWidth, int videoHeight,
@@ -90,61 +105,6 @@ public class MetadataInjector {
         }
 
         return new Dimension(videoWidth, videoHeight);
-    }
-
-    private static void writeMetadata(File videoFile, String metadata) {
-        byte[] bytes = Bytes.concat(UUID_BYTES, metadata.getBytes());
-
-        File tempFile = null;
-        FileOutputStream videoFileOutputStream = null;
-        IsoFile tempIsoFile = null;
-
-        try {
-            tempFile = File.createTempFile("videoCopy", "mp4");
-            FileUtils.copyFile(videoFile, tempFile);
-
-            tempIsoFile = new IsoFile(tempFile.getAbsolutePath());
-
-            //first, get the "moov" box from the mp4
-            MovieBox moovBox = (MovieBox)getBoxByName(tempIsoFile, "moov");
-            if(moovBox == null) throw new IOException("Could not find moov box inside IsoFile");
-
-            //get the Movie Track to which we will add the Metadata
-            TrackBox trackBox = (TrackBox)getBoxByName(moovBox, "trak");
-            if(trackBox == null) throw new IOException("Could not find trak box inside moov box");
-
-            //create a new UserBox, which actually contains the Metadata bytes
-            UserBox metadataBox = new UserBox(new byte[0]);
-            metadataBox.setData(bytes);
-
-            //add the Metadata UserBox to the Movie Track
-            trackBox.addBox(metadataBox);
-
-            //finally, reduce the Video's FreeBox, whose size we will need
-            //to reduce by the Metadata Box's size to preserve the Video's File size
-            FreeBox freeBox = (FreeBox)getBoxByName(tempIsoFile, "free");
-            if(freeBox == null) throw new IOException("Could not find free box inside IsoFile");
-
-            int freeSize = Math.max(0, freeBox.getData().capacity() - (int)metadataBox.getSize());
-            freeBox.setData(ByteBuffer.allocate(freeSize));
-
-            //save the ISO file to disk
-            videoFileOutputStream = new FileOutputStream(videoFile);
-            tempIsoFile.getBox(videoFileOutputStream.getChannel());
-        } catch(Exception e) {
-            LOGGER.error("Spherical Metadata couldn't be injected", e);
-        } finally {
-            IOUtils.closeQuietly(tempIsoFile);
-            IOUtils.closeQuietly(videoFileOutputStream);
-            FileUtils.deleteQuietly(tempFile);
-        }
-    }
-
-    private static Box getBoxByName(BasicContainer container, String boxName) {
-        for (Box box : container.getBoxes()) {
-            if(box.getType().equals(boxName)) return box;
-        }
-        return null;
     }
 
 }

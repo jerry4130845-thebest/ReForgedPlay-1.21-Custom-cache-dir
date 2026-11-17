@@ -1,6 +1,6 @@
 # ReForgedPlay 自定义目录与 RAMDisk 支持计划
 
-> 状态（第三批P：实现及授权验证层通过，进入用户自行提交源码检查点；实际游戏未验收）：D-final独立22/33/完整20/新33＋18个Quick/连接例、真实C/R、完整build23s及新最终JAR真实Sponge4/4全部通过。Lead已复核八实现文件实际范围/关键diff、亲核当前源码与JAR指纹、完整八文件patch及白名单；13.27为最终收据。只更新计划收尾，不再改生产源码，不代执行Git写/安装/游戏、不进入下一批。NeoForge实际launch/全模组/世界UI/render/game及OS权限不足项仍未签；历史13.22证据覆盖/13.23权限字段偏差完整保留，未借最终PASS洗掉。最后结束活跃目标，停等用户审查并自行commit。
+> 状态（第四批实现及授权验证层通过，进入用户自行审查/提交源码检查点；实际播放器/游戏未验收）：D重试独立review和seal闭合，首D当前源码243/422与六源编译、Lead专用build59s、全新最终JAR核心243＋UUID正反23均通过且归属分开。Lead已复核五既有源码完整diff/helper关键事务与ledger/UUID段、六source及JAR指纹/白名单，14.15为最终收据与完整六sourcepatch。到此不再改实现，不Git写/安装/真实FFmpeg/player/MC/上传/whale-craft，不进入下一批；结束活跃目标后停等用户commit。前置/碎片/多轨等受限布局、nonAVC/nearheap/真实UI等未测和安全降级不得藏起。
 > 用户目标：独立配置 cache、raw、temp、tmp、record 等目录，支持绝对路径及相对于游戏目录的路径；将可丢弃缓存和临时文件放在 RAMDisk，用完清理，减少实体硬盘写入。没有已报告故障，本次属于预防性兼容与容错设计。
 
 ## 1. 项目基线与证据边界
@@ -950,3 +950,212 @@ Lead用只读git diff及四份新增文件的no-index diff生成[完整八实现
 - 本批到此停下：用户先审查这八实现文件＋计划并自行commit，AI不Git add/commit/push/reset/checkout，不安装或复制到模组目录，不自动进入下一批。所有检查完成后Lead将活跃目标标complete使其不再自动继续；目标物理历史记录删除没有公开工具，不能假称已物理删除。
 
 D-final原话：现在不仅旧包进不来，合法的新串流也真实重开并继续到达；绿灯只签已经跑过的那一层。
+
+## 14. 第四批候选：视频元数据 tempPath 与失败保源（仅 A 规划，2026-11-16，待批准）
+
+### 14.1 当前权限、目标与时代基线
+
+- 用户已自行提交第三批。本轮 A 亲读 `git status --short` 为空、完整 HEAD=e9e89195a25096ad17c753ba003ea3da3dbe5a3b、message=`temp support update`；前一 HEAD=d4911356b918c8e34d32784ca6436ff8b64c5c43。更新后唯一预期差异是本小写 [plan.md](<plan.md>)；13.27 和全部历史失败/权限偏差原文保持。
+- 当前只批准规划：A 只改本计划，不启动 B/C/D、不写源码/harness/样本、不构建、不 Git 写、不装包、不碰实际配置、依赖、wrapper、.env/.vscode、游戏、whale-craft 或旧证据。不请求权限字段/升级；合规工具不可用即停报。本轮未重新加载技能，不把 Lead 已读技能冒称 A 本次加载。
+- 已重读 [build.gradle](<build.gradle#L1-L11>)、[gradle.properties](<gradle.properties#L6-L20>)、[wrapper](<gradle/wrapper/gradle-wrapper.properties>)、[NeoForge 元数据](<src/main/resources/META-INF/neoforge.mods.toml>)、libs 布局。保持 MC1.21.1 / NeoForge21.1.82 / Java21 / Gradle8.8 / Architectury Loom1.7-SNAPSHOT（13.27 实际1.7.435）/ Yarn1.21+build.1＋patch1.21+build.4；这是现代 Java21 既有 Loom 工程，不迁移 ModDev、不升级版本。
+- 只做视频球面元数据这一片：一次任务快照 tempPath；候选视频在所选 temp 创建；正式输出在安全提交前从不 truncate/删除。失败保留原视频或明确的恢复材料，元数据成功有实际验证而非日志猜测。
+- 排除 rawPath/recordingWorkPath/tmp/ReplayStudio 保存恢复、cache identity/ephemeral、native、图片及资源包 lease/Full/bridge/Mixins 重构。现有 [Setting.java](<src/main/java/com/replaymod/core/Setting.java#L5-L7>) 三个路径键不增改；不宣称完成全部 RAMDisk 需求。
+
+### 14.2 实际依赖与调用链证据（只读核查，不是新测试 PASS）
+
+- [构建脚本](<build.gradle#L66-L108>) 为 `include(implementation('com.googlecode.mp4parser:isoparser:1.1.7'))`；实际缓存 [二进制 JAR](<C:/Users/zhenz/.gradle/caches/modules-2/files-2.1/com.googlecode.mp4parser/isoparser/1.1.7/bb17c600cf992fdfd8d5ba58f3f424b34ee46ea2/isoparser-1.1.7.jar>) 为899506B，SHA256=ddbbf392f8e61f770a509a49aed5f32ead19768283b4b512c626e09e1ba5cc46。没有运行 Gradle 解析/依赖测试或下载。
+- 当前 [正式 JAR](<build/libs/reforgedplaymod-1.21.1-0.3.1.jar>) 内确有 `META-INF/jars/isoparser-1.1.7.jar`，919579B，SHA256=da927bb9fde212f3f19cbd9dfb773710bd5b6ed5341550328c9033440e89e042。整 JAR 字节不等，但逐项比对全部478个 class 与缓存完全相同，新增 nesting metadata；不能拿 ZIP 包整体 hash 不同误判 API 不同，也不把嵌套存在当 NeoForge 实际加载通过。
+- 用绝对 Java21 `javap.exe -p -c` 核对实际二进制 IsoFile/FileDataSourceImpl；并只读打开同版本 [sources JAR](<C:/Users/zhenz/.gradle/caches/modules-2/files-2.1/com.googlecode.mp4parser/isoparser/1.1.7/56d02a39a8e0bfa82bf6b9c7cb9470fba3ce6927/isoparser-1.1.7-sources.jar>) 的容器、UUID、free、mdat、MemoryDataSourceImpl。首次查错两个归档条目 exit11，已纠正到实际路径；不是编译/业务失败。
+- [MetadataInjector.java](<src/main/java/com/replaymod/render/metadata/MetadataInjector.java#L95-L140>) 当前复制整视频到系统 temp，再 `FileOutputStream(videoFile)` 截断原件，catch Exception 仅记录，finally quiet-close/delete 副本。这里是源码风险，不是用户已发生视频丢失事故。
+- 另一个本片必须处理的格式风险：现有 `new UserBox(new byte[0])`＋把 UUID 拼入 data，与1.1.7 `AbstractBox` 固定计16字节 userType 的尺寸计算不一致；必须改成16字节 UUID 作 userType、仅 UTF-8 XML 作 data，不能继续原写法后只测 exists。
+- [VideoRenderer.java](<src/main/java/com/replaymod/render/rendering/VideoRenderer.java#L233-L253>) 在 pipeline.run 后注入、随后 finish；[完成 UI](<src/main/java/com/replaymod/render/rendering/VideoRenderer.java#L418-L434>) 只看 hasFailed，不知道 void 吞错。[RenderSettings](<src/main/java/com/replaymod/render/RenderSettings.java#L137-L169>) 保存的是请求开关，不是注入成功凭证；[GuiRenderingDone](<src/main/java/com/replaymod/render/gui/GuiRenderingDone.java#L73-L85>) 无元数据状态。
+- [Pipeline](<src/main/java/com/replaymod/render/rendering/Pipeline.java#L75-L90>) 正常路径关闭 consumer，但 [FFmpegWriter.close](<src/main/java/com/replaymod/render/FFmpegWriter.java#L82-L105>) 等至多30秒后 destroy，未保证进程已退出/exit0。不能凭 run 返回就写仍活跃视频；候选白名单因此包含一个只读完成门，不重做 FFmpeg 生命周期。
+- 第二调用方 [YoutubeUploader.preUpload](<src/main/java/com/replaymod/extras/youtube/YoutubeUploader.java#L130-L198>) 转码 waitFor/exit0 后调用；它还用 settings 开关推断“已经注入”。新结果必须贯通这里，不能渲染降级后上传仍跳过检查。当前 `deleteOnExit` 转码文件/Thread.stop 等旧问题不顺手修改。
+
+### 14.3 外部 API 来源与已知限制（核查日2026-11-16）
+
+| API/事实 | 已读来源与决策 |
+| --- | --- |
+| `IsoFile(DataSource)`、`getBox(WritableByteChannel)`、`close()` | [官方1.1.7 IsoFile](<https://raw.githubusercontent.com/sannies/mp4parser/mp4parser-project-1.1.7/isoparser/src/main/java/com/coremedia/iso/IsoFile.java>)＋本机二进制；getBox遍历懒加载盒，close仅关闭 DataSource，不关闭调用者输出，也不保证解除所有映射。 |
+| 默认 String 构造使用 FileDataSourceImpl.map→FileChannel.map | 本机二进制/同版源码；[JDK21 MappedByteBuffer](<https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/nio/MappedByteBuffer.html>) 明确映射持续到 buffer 被 GC。不能用 quiet-close、System.gc、反射 unmap/native 或删除重试冒充 Windows 映射已解除。 |
+| `MemoryDataSourceImpl(byte[])` / `(ByteBuffer)`，map只切内存buffer，close为noop | [官方1.1.7实现](<https://raw.githubusercontent.com/sannies/mp4parser/mp4parser-project-1.1.7/isoparser/src/main/java/com/googlecode/mp4parser/MemoryDataSourceImpl.java>)＋缓存源码；只用于有上限的 moov，不读整视频到内存。 |
+| 懒解析可能将 IOException 当迭代结束；部分 getBox 只调用一次 write/transfer | [官方1.1.7 BasicContainer](<https://raw.githubusercontent.com/sannies/mp4parser/mp4parser-project-1.1.7/isoparser/src/main/java/com/googlecode/mp4parser/BasicContainer.java>)＋实际 AbstractBox/mdat 源码。因此需独立边界/长度验证、完整写入适配；不把“能打开 IsoFile”当完整文件证据。 |
+| UserBox userType 与 data 分离 | [官方1.1.7 UserBox](<https://raw.githubusercontent.com/sannies/mp4parser/mp4parser-project-1.1.7/isoparser/src/main/java/com/coremedia/iso/boxes/UserBox.java>)＋实际 AbstractBox；UUID16＋XML UTF-8，验证实际序列化尺寸/内容。 |
+| `Files.move(..., ATOMIC_MOVE)` 与目标存在 | [JDK21 Files.move](<https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/nio/file/Files.html#move(java.nio.file.Path,java.nio.file.Path,java.nio.file.CopyOption...)>) 正文已读：其他选项被忽略，已有目标是替换还是失败由实现决定；跨store/provider可能不支持。非原子move异常时状态未定义。 |
+| Windows 原子分支与 null-key | [OpenJDK21u WindowsFileCopy](<https://raw.githubusercontent.com/openjdk/jdk21u/master/src/java.base/windows/classes/sun/nio/fs/WindowsFileCopy.java>) 原子分支为 MoveFileEx(REPLACE_EXISTING)，普通替换分支可先删目标；[WindowsFileAttributes](<https://raw.githubusercontent.com/openjdk/jdk21u/master/src/java.base/windows/classes/sun/nio/fs/WindowsFileAttributes.java>) fileKey返回null。官方21u不是本机驱动实测或条件替换保证，生产不调用内部API。 |
+
+### 14.4 推荐路线 A：tempPath 放新输出，尾部 moov 的保守子集
+
+1. **只处理普通非fragmented MP4、单一 moov且为最后一个顶层盒、单一 trak、至少一个完整 mdat；moov上限16MiB（待用户接受的兼容边界）**。拒绝 moof/外部媒体引用、畸形/截断/溢出长度、size0等未支持布局、无moov/无trak/多轨/前置moov；原视频不动并明确元数据未应用。不扩为通用 remux 或改 stco/co64 的框架。
+2. 理由：当前 [默认MP4参数](<src/main/java/com/replaymod/render/RenderSettings.java#L63-L70>) 没有 faststart/moov_size，且默认无音轨；典型结果是尾部moov，但**实际ffmpeg输出布局仍未测，不保证所有自定义参数命中此子集**。不能只保持总文件长度就断言media offsets安全。
+3. 用纯JDK长整型顶层header扫描与溢出/EOF检查记录extent，只把有界moov读入 heap；用 `IsoFile(new MemoryDataSourceImpl(...))` 解析这一个盒，完整round-trip先证原moov无无关变化，再加UUID/XML。其他所有字节（包括 free/mdat、chunk offsets指向的媒体）原样流式复制，moov保持原起点，仅在文件尾增长。无需缩减free，**无free/小free在合格尾moov布局可成功**；前置moov即使有free也先保守跳过。
+4. heap预算须连输入moov、解析/序列化临时副本一起估算（目标≤64MiB，不冒称旧解析器有严格总heap配额）；前置检查子盒边界/数量及声明条目数与盒字节范围，遇不确定/过量即跳过，不让畸形count触发大分配。媒体用固定≤1MiB缓冲；moov生成/校验均有大小上限和完整写入循环，不 byte[]整视频、不对原视频调用默认映射 IsoFile、不解析mdat内容为内存盒。
+5. 开始快照一次 tempPath。所选root下独占 `.replaymod-video-...` 任务目录，以 CREATE_NEW 创建 `candidate.mp4`，直接将“原视频前缀＋新moov”流式写进去；**不额外复制整份输入到RAMDisk**。关闭源channel、输出stream/channel、IsoFile及DataSource后才进入校验/提交；构造IsoFile失败也要关闭已取得的source，主异常保留suppressed。
+6. 候选关闭后验证顶层extent/新moov/trak/UUID/XML、预期长度与moov增量；流式比较原前缀至moov起点完全一致，特别是所有mdat的原始起点/长度/媒体字节；stco/co64原条目保持且指向原媒体范围。独立盒边界检查补足懒解析吞IO，失败不发布。
+7. 在**原视频真实父目录所在目标卷**独占建stage目录/CREATE_NEW payload，流式复制candidate，关闭后 `Files.mismatch(candidate, stage)==-1` 并复核结构；提交只从该stage到原目标，绝不跨盘直接替换。没有可靠同卷信息也不猜盘符；容量查询可选、失败不阻断安全检查，实际IO错误必处理。
+8. RAMDisk候选约需视频大小N，目标卷额外stage约N；原N一直在。所选temp在实体盘时会有两份新输出写入，这是保源/跨盘提交代价，**不能宣传默认也省全部写盘**。本片不加同卷move/硬链接快路径；若此容量/写入代价不接受，选路线B延期，不反加一份无收益的RAM输入副本。
+
+### 14.5 快照、发布、身份与失败合同
+
+- 新服务入口（项目自有拟议API）`snapshotVideoMetadataTempRoot() throws IOException`：只读一次现有TEMP_PATH，空/null/全空白返回默认选择标记null；绝对原卷、普通相对固定mcDir、非空不trim、不展开变量。拒绝 `R:Temp`/`R:`/`\Temp` 等半绝对语法及invalid，诊断原值/阶段/解析root；不静默回退、不复用 Image.TemporaryFile 或资源包lease，不改两者现有语义。
+- helper在任务内固定实际root、真实target parent、所有路径与快照；默认调用JDK默认temp目录重载，显式root可createDirectories/toRealPath但不取得root删除权。配置热更新仅影响后续任务；失败不得转系统temp/原视频目录伪装配置已生效。不设全局java.io.tmpdir。
+- 所有目录、payload、可选witness一创建成功立即记本次ledger（阶段/归属/完整性/close状态）；CREATE_NEW失败不认领冲突项。可信root/父路径任务期间不遭恶意置换、输入已关闭且独占是明确前提；NOFOLLOW类型/真实路径/可用fileKey辅助检查，不把marker或exists当沙箱/原子身份。
+- 记录原普通文件size/mtime/可用key及流式SHA-256，提交前重新检查属性和完整digest、拒绝已知替换/同长度内容变化；进程内注入入口串行防自家同目标并发。Windows null-key不报不可用；可选hardlink witness可加强identity，失败不把原可用卷变成新硬要求。没有witness时同内容替换/恶意父路径与check→move窗口仍依赖独占契约，**不宣称跨进程CAS/无竞态替换**。
+- 唯一提交动作 `Files.move(stagePayload, original, ATOMIC_MOVE)`，是显式授权替换这个已完成的视频，不是新文件的不覆盖发布；REPLACE_EXISTING不能加强ATOMIC的可移植语义。先证明target仍为输入、stage完整且全部句柄已close。原件在此动作成功前一直不由本功能truncate/delete；不先删原、不备份rename后腾空原路径、不退回非原子REPLACE/move/copy。
+- AtomicMoveNotSupported、已有目标不可替换、Windows占用/映射锁等：保守降级为“不应用元数据、原视频保留”，保留已验证candidate/stage诊断路径，不盲重试。只有复核原完整digest/状态后才能说UNCHANGED；若提交异常/后验读取异常导致无法确认，标INDETERMINATE，保留全部完整材料，不假称原件仍在或视频丢失。
+- 提交正常返回后标APPLIED，再只读验证目标与stage预先digest/结构一致；失败标INDETERMINATE，不做自动反向覆盖。清理失败是已应用但有遗留的警告，不把成功视频改说丢失，也不重做提交；不承诺fsync目录、跨provider强持久化、断电恢复事务或崩溃自动清理。
+- 正常确认后才精确删本次已可丢弃的candidate/可选witness和空任务目录，永不递归/删root/删陌生项；删除前身份边界无法确认则保留并诊断。parse/write失败的部分candidate在源已证未变且所有句柄close成功时才可清；close失败保留。完整新候选/stage是恢复材料，任何失败路径不得finally删掉唯一完整新版本；不可把视频helper套成图片“一律TWR清空”。
+- 主要结果设计为helper嵌套 `APPLIED / ALREADY_PRESENT / UNCHANGED / INDETERMINATE`＋cause/phase/实际路径/cleanup诊断（项目自有设计，非外部API）。正确UUID/XML已在合格原视频中实际验证才ALREADY_PRESENT，不能仅用settings开关判断；重复调用不重复插入。非本支持布局但无法验证既有元数据，不假签ALREADY_PRESENT。
+- 保留现有void入口为兼容facade，新增显式结果入口供两个实际调用方使用；void仅best-effort有明确日志，不能作为成功凭证。渲染遇UNCHANGED可保留“视频渲染完成”但日志明确“球面元数据未应用、原视频未改”，此**仅日志提示、无新增GUI**需用户接受；INDETERMINATE经setFailure后仍走finish拆除，不显示成功窗口，不提前throw跳过finish。
+- 上传球面视频不再以请求开关跳过：始终验证/幂等注入，只有APPLIED/ALREADY_PRESENT才继续；UNCHANGED/INDETERMINATE用已有IOException流程停止上传，消息明确原视频/材料位置，不称视频渲染失败或丢失。不联网/登录/实际上传验证；旧非MP4转码deleteOnExit文件不冒称永久恢复材料，其原videoFile仍是保留源。
+- 渲染仅在非cancelled/hasFailed、ffmpegWriter存在、其进程已退出且exit0、实际 `getVideoFile()` 与预期目标一致时注入；否则跳过并诊断，不碰可能仍写的文件。给FFmpegWriter加只读ready查询，不能改close等待/kill策略或伪造进程已关闭。
+
+### 14.6 待批准的精确源码白名单与责任（当前一个也未获写权限）
+
+| 候选文件 | B最小框架 → C实现 → D只读审查 |
+| --- | --- |
+| [ReplayFoldersService.java](<src/main/java/com/replaymod/core/files/ReplayFoldersService.java>) | 仅新增视频root快照入口/必要局部解析；旧image、资源lease及底部raw/work/cache方法逐字不动。 |
+| [MetadataInjector.java](<src/main/java/com/replaymod/render/metadata/MetadataInjector.java>) | 新显式结果入口、原void兼容facade；保留mono/ODS XML/FOV语义，改UUID/UTF-8构造并调用专用helper。 |
+| 拟新增 `src/main/java/com/replaymod/render/metadata/VideoMetadataTask.java` | 专用有界moov处理/流式candidate与stage/验证/原子提交/ledger/嵌套结果；不建通用事务框架、不增生产测试钩子。 |
+| [FFmpegWriter.java](<src/main/java/com/replaymod/render/FFmpegWriter.java>) | 仅新增进程已退出exit0的只读ready查询，名称/契约B固定；不修改现有close/abort/export流。 |
+| [VideoRenderer.java](<src/main/java/com/replaymod/render/rendering/VideoRenderer.java>) | 仅元数据调用段的ready/输出路径门、结果分流与必要局部字段/import；保留finish/队列/Post生命周期。 |
+| [YoutubeUploader.java](<src/main/java/com/replaymod/extras/youtube/YoutubeUploader.java>) | 仅球面元数据调用条件及结果→IOException；不改网络/auth/转码命令/文件清理/取消。 |
+| [plan.md](<plan.md>) | A本轮唯一写入；未来B/C/D只读，收据交Lead，不擅改历史。 |
+
+B/C/D未来须串行；用户一次明确批准本批方案、精确白名单及验证范围后，按该授权顺序执行，不逐阶段重复索取相同授权。当前未获实施批准，任何阶段都不启动；范围或能力限制变化另行确认。D默认不修源码，失败回Lead/C。若要GUI可见警告、支持前置moov/多轨/fragmented、改FFmpeg终止保证或新增其他文件，先停下申请新白名单；不能视此候选表为已批准。
+
+### 14.7 未来验证门与停点（只计划，现阶段不执行）
+
+1. 新批测试预算单列待确认：建议全批累计合成样本≤16MiB、单样本≤1MiB（含candidate/stage/保留失败副本），代码/classes/log另记；仅新独占 `C:\Temp` 目录，批准后才可创建，不继承第三批32MiB额度，不删除旧证据腾预算。跨真实卷/R另授权；没有授权时用外部provider验证边界并标真实跨盘UNTESTED。
+2. 使用实际1.1.7 JAR生成小MP4盒夹具，不安装包、不跑真实ffmpeg：正确ftyp/moov/trak/mdia/minf/stbl、stco或co64/stsc/stsz等及真实mdat extent、mono/ODS XML/FOV字段。夹具自身边界/样本offset先独立检查，不把空moov或仅exists当播放器可用样本。
+3. 正例：有/无/不足free但尾moov、Unicode/空格/default/absolute/mcDir-relative、设置任务中切换、幂等重复、原前缀/媒体逐字节和全部offset不变；新UUID16/XML UTF-8、盒实际长度/增量、资源真实close及完成后可重开/rename/delete均需断言。
+4. 拒绝例：无moov/no-trak/多轨/前置moov/fragmented/坏长度或EOF/超moov预算/非法路径/文件作root。全视频不进byte[]；不能只测helper输入拒绝绕过后面的发布门。支持子集和真实ffmpeg/播放器/MC/native未测明确分开。
+5. 故障：候选创建/读源/parse/写出/输入输出close/结构校验/复制stage/容量不足/发布错误/cleanup错误；短读短写零进度需有界退出。只用隔离夹具/新外部harness，不能灌满盘、卸载卷、改ACL/真实配置或加入生产钩子。确定性覆盖不了的分支标UNTESTED，不能以控制流审查签实测。
+6. 发布：跨卷边界、ATOMIC unsupported/已存在目标替换能力、Windows占用、发布前已知同长同mtime替换、同目标进程内并发与外部违约；每个非成功样本验证原完整digest不变或如实INDETERMINATE且恢复材料保留，绝不先truncate。无hardlink/null-key仍能按可信目录契约使用；别把不带REPLACE的move/先exists当并发不覆盖证明。
+7. 清理：root/外来sentinel始终不动；未知替换/链接/junction/无法确认身份保留；创建对象立即ledger、构造失败也可定位；主异常与suppressed、完整候选保留、close/Windows删除失败不盲重试。实际OS权限不足/驱动不支持如实SKIP，不借synthetic provider冒签OS门。
+8. 集成只读检查：两个实际调用方消费结果、settings不冒充receipt、INDETERMINATE不成功UI、渲染finish必走、上传失败不继续、FFmpeg未退出不注入；原voidfacade兼容。对外部stub层/真实mp4parser层/最终JAR结构层分开报告，游戏和网络仍无授权。
+9. 获批准且C完成后，D最后专用 `mc_gradle(projectDir="C:/Users/zhenz/Desktop/ReForgedPlay-1.21", task="build", args=["-Djava.io.tmpdir=C:\\Temp","--console=plain"], timeoutMs=1200000)`；不clean/refresh/`-x test`/改依赖。必要compileJava另问Lead；记录真实工具返回，NO-SOURCE不当JUnit通过，重读最终non-dev-shadow与嵌套isoparser，不沿用旧构建PASS。
+10. 最终diff精确白名单、旧证据保护、实际测试/未测收据交Lead，停等用户审查commit，不自动进入native/cache/事务恢复；真实ffmpeg/播放器/NeoForge游戏验收另行授权。A本轮结束仅运行只读git diff --check与实际plan diff，不新建报告或测试。
+
+### 14.8 用户确认项与阻塞
+
+- **推荐A（待选）**：批准上述六源码（其中一个新增helper），尾moov/单轨/16MiB moov上限；tempPath用于新输出＋目标卷stage，接受两处约N容量及temp在SSD时两份写入；atomic替换不支持则保原并报告元数据未应用，不做非原子降级。
+- 接受渲染元数据可选失败仅日志提示、视频仍可完成；球面上传必须实际验证/成功注入，否则停止上传。若要求UI直接显示元数据warning，先单独扩GUI白名单，不把当前完成界面称“元数据已注入”。
+- **路线B（安全延期）**：不接受受限容器/容量/仅日志提示时，本批先不实施，另议有界重定位/offset修正或更大GUI方案；只用target sibling、tempPath不生效的方案不能算完成当前需求。
+- 需另批上述新C:\Temp预算与harness创建/执行、D构建权限；真实跨卷/R、实际ffmpeg/播放器/MC/native仍UNVERIFIED/UNTESTED，不偷用旧授权。当前阻塞是用户尚未选择/批准，不是已发现的用户事故，也不是缺依赖需升级。
+
+A想说：这次先让元数据失败只能少一项附加信息，不能顺手带走已经渲染好的视频。
+
+### 14.9 用户实施批准、顺序交接与预算（当前优先级高于A的待批表述）
+
+- 用户承接Lead汇总方案A/六源码＋计划/16MiB外部验证/最终build，以及“真实R盘私有小样本是否允许”的整批提问，明确答“嗯，批准”。Lead按整批批准记录：六源码为14.6列出的Folders、MetadataInjector、新VideoMetadataTask、FFmpegWriter、VideoRenderer、YoutubeUploader；计划仅Lead维护；C/R测试限定各卷唯一自有根。不是其他源码/配置/依赖/仓库测试/真实游戏/FFmpeg/实际网络上传授权，不扩大尾moov单轨子集。若需改变限制、加GUI/改FFmpeg退出策略/加第七源码，先停问用户。
+- 创建本批独立目标goal-07730e7e-3aaa-42cd-a9d4-83b1ea88fa93，初始rev1/active/armed。基线完整HEAD=e9e89195a25096ad17c753ba003ea3da3dbe5a3b，实施前只有本plan差异，第三批八实现sha256sum --check全OK；wrapper仍8.8。不是恢复已经完成的第三批目标。
+- 严格接续A→B窄框架/外部stub→C实际内容/外部验证→D只读独立验收与专用build，阶段不并行写同一项目，不scaffold既有工程。一次本批批准涵盖原范围必要修复与重验，不重复问相同授权。各child只读plan，Lead阶段间回读收据/真实diff后更新，不把异步工具返回当阶段完成。
+- B固定自有API/结果和只读writer-ready门、最小调用方接线及helper框架；未实现的关键路径必须明确fail-closed/UNCHANGED或抛未实现异常，绝不能假APPLIED/无效空成功；不运行旧截断原文件路径来伪过回归，不把B候选当可安装。C必须补全并移除交付中的框架占位，D严查实际生产执行。
+- C可按helper核心与调用方两片顺序分工，但仍总六源码内，不改第三批resource lease/Full/Bridge/Mixins/JSON、Image或第一批搬移。Folders仅新增视频root快照入口，原各方法逐字保持；FFmpegWriter只读进程exit0/完成就绪查询，不改close/abort/命令/管道。新helper是专用视频任务，不扩通用事务框架。
+- 结果只在完整验证后对外返回APPLIED/ALREADY_PRESENT；move动作正常返回但后验不明只能INDETERMINATE，不能先对调用方报告成功。UNCHANGED必须有源完整性证据；失败保留已验证新候选/stage、close不明不删；渲染保留完成视频的可选失败只日志、未知提交失败不成功UI且finish照走，球面上传必须实际receipt才能继续。请求开关不能作receipt，未支持布局也不能虚称已验证元数据。
+- 全批保留合成样本≤16MiB、单个文件≤1MiB（独立moov上限/超限可用受控provider或稀疏声明边界，不为测试生成16MiB真实payload）；目录所有硬链接按保守逻辑大小审计，helper候选/stage/失败材料都计入。建议B≤1MiB、C≤8MiB、D预留≤7MiB，阶段间可由Lead重分配但不突破16MiB；代码/classes/JAR/log单列。不得删除旧第三批或本批失败证据腾预算，不继承第三批32MiB额度，不拿空盒当有效媒体样本。
+- 新独占C:/Temp/reforgedplay-B4/C4/D4-随机目录，明确OUTPUT_ROOT/参数驱动，所有生成stub、-d、日志、tmp/cache/fixture/sidecar/设置输出先验证属于新根，旧证据只读不可直接跑旧fixed-O脚本。R:/Temp只唯一private测试根及自有样本；root/sentinel保留断言前不得善后，不能扫描/删R:/Temp或其他任务。R不可用/OS权限不足如实SKIP，不提权/装驱动/改ACL/卸载卷/灌满真盘。
+- **严禁sandbox_permissions/justification字段或权限升级请求**，不因当前danger值或无实际提权效果而携带。使用read/glob/grep/原生ops_bash/ops_replace/ops_inspect等；需要写新文件可先短ops_bash创建唯一空文件/复制已读小模板，再用精确路径literal ops_replace（glob=[]），长脚本先合规落盘再script_path执行。无合规工具就停报，不通过Gradle注入任务/重注册插件绕过。历史旧证据覆盖及违规只作警示，不重演/伪恢复。
+- MC1.21.1/NeoForge21.1.82/Java21/Loom1.7/Gradle8.8/实际isoparser1.1.7保持。最终D必须mc_gradle task=build args=["-Djava.io.tmpdir=C:\\Temp","--console=plain"] timeout1200000；不clean/refresh/跳test、不写构建，不用shell gradlew。NO-SOURCE不是JUnit通过，实际mp4parser/受控FS/MC-stub/最终Jar层分别报告。未启动NeoForge/播放器/FFmpeg/上传，不预签视频真实可播或游戏接受。
+- 全部门通过后Lead真实diff/白名单/指纹复核、更新计划并关闭活跃目标，停等用户commit，不Git写、不安装、不自动进入native/cache/恢复下一批。当前只是授权和B起点，没有本批实现/编译/业务验证成功收据。
+
+### 14.10 B窄框架真实交付、Lead复核与顺序C分片
+
+- [B交接报告](<C:/Temp/reforgedplay-B4-20261117-0046-96e31d2a/REPORT.md>)、[真实六源码patch](<C:/Temp/reforgedplay-B4-20261117-0046-96e31d2a/six-source.patch>)、[前后指纹](<C:/Temp/reforgedplay-B4-20261117-0046-96e31d2a/source-fingerprints.tsv>)。Lead回读报告、实际helper全72行、MetadataInjector结果入口、Renderer metadata段、Uploader球面段及stub35条日志，亲跑六源sha256sum/status/diffcheck；仅五既有源码＋新增helper＋Lead计划，无第七source。
+- B固定自有签名：Folders.snapshotVideoMetadataTempRoot():Path；FFmpegWriter.isVideoMetadataReady():boolean；MetadataInjector.injectMetadataWithResult(...):VideoMetadataTask.Result throws IOException，旧void facade保持。helper.apply(Path source, Path selectedTempRoot, byte[] userType, byte[] xmlUtf8)静态同步；内嵌四状态Status与Result(status,phase,cause,source,tempRoot,candidate,stage,cleanupDiagnostics)，metadataPresent仅前两成功状态，asIOException带原cause及完整路径诊断。候选/stage为payload路径，未建可null，孤立目录/witness须诊断可查；不是外部API。
+- MetadataInjector已移除旧复制/映射/截断原件/finally删副本路径；root单快照、UUID16/XML-only UTF8分离。Folders仅插入视频快照入口、FFmpegWriter仅插入只读ready方法；其余旧代码有可重构字节相等证明。Renderer仍finish/Post，未知结果setFailure；Uploader球面实际成功才继续，非球面及网络/transcode/cancel不变。
+- **helper仍显式UNIMPLEMENTED IOException，在任何文件IO前失败，没有APPLIED或UNCHANGED伪receipt。** 当前请求元数据的渲染会记录失败但仍走finish/Post，球面上传停止；这是未交付的B框架状态，不能因编译过就装包。C必须移除最终交付的placeholder并实现真实事务。
+- B实际六源外部Java21 --release21/-proc:none编译exit0；实际root/ready/facade/helper-stub共35断言通过，另提取源码literal调用段＋**假helper receipt**的37断言通过（仅分流层）。实际isoparser验证UUID16/XML小盒，不是媒体fixture或视频事务。第一次Windows argv超长、路径空格预期错误、logger-stub缺方法与编码失败均保留，修的是外部工具/错误测试预期，未伪造业务通过。
+- 冻结B六源：Folders7ab091e869f37a8add2d69d094f82c31dfec94d942af5926a473e958c55b4c62；Injector9324af5bcf8b36bacf7506054faaf1a31fa63405a75775e20958718113e6d2c8；Task e740fea1efd8e6195d4105028a42278de41fa5b17eebcd8b3900e6477e4cb6ba；FFmpegWriter d864713396c24554451a6d9c7ac72d72660aab7e3fe2a243fc2f40b763e993f9；Renderer1a8352c5d20c882669ec198636326eb7c05844a5ec1ad06d93f242d1b31be605；Uploader15aafae687d46794e1ba40c2881b35f69f11f4bc7a53e3df5427255c55afd0bd。C1仅改Task，其余五指纹保持，必要API问题先交Lead。
+- B旧证据6110文件changed/removed/added全空，未带权限字段、未覆盖原证据；plan在B内字节不变。仅保留两sentinel共54B，无MP4/candidate/stage，没有触R/真实FFmpeg/游戏/上传，没有project build，旧第三批结果不被复用为本批验证。
+- **C1**专修helper核心：有界完整extent/子盒计数与roundtrip，UUID幂等/支持子集、流式candidate、目标卷stage、close/全验证/原子替换、未知结果保留、创建ledger与精确清理；使用真实依赖和小合成MP4，预算所有迭代≤6MiB，单file≤1MiB。原五API/调用方冻结，不加生产test hook或新source。失败回报不扩大格式限制/改原子合同。
+- **C2**顺序完成剩余真集成验证：不靠B假receipt签字，将实际helper与实际facade/ready/调用边界串起，完整单任务root/实际结果路径/同目标并发、渲染finish与失败UI门、上传无网络gate、预算≤2MiB，必要修复仍仅原6source。实际整段VideoRenderer/game无法执行明确分层，外部提取/Unsafe边界不能冒充游戏。
+- D在C1/C2后独立全部必测正负例/真实C/R/专用完整build＋新最终Jar/classes/实际嵌套isoparser重核。B54B＋C最多8MiB＋D最多7MiB合计低于16MiB（余量保留），阶段总byte准确审计，不删旧失败日志/样本腾预算。真实播放器/FFmpeg/NeoForge/网络仍未授权，最终源无占位才可进入D门。
+
+B原话：I would rather hand C an unmistakable exception than a plausible-looking success that still truncates the video.
+
+### 14.11 C1核心候选收据与C2真实集成门
+
+- Lead回读[C1完整报告](<C:/Temp/reforgedplay-C4a-20261116-180250-2958/REPORT.md>)、实际helper主流程1–235及ledger948–1125、[run06原日志](<C:/Temp/reforgedplay-C4a-20261116-180250-2958/run06/java.raw.log>)关键正负例与TOTAL PASS243；亲跑六source SHA/status/diffcheck，唯一C1源码改动为Task，其他五source仍14.10指纹。Task现453d4b236990fbdf986ef9c23fc03c3a3ea7cfb874cdddd2df24bf15bec624a0，1125行/60253B，B API不变且UNIMPLEMENTED已移除；[单源真实patch](<C:/Temp/reforgedplay-C4a-20261116-180250-2958/audit-final01/one-source.patch>)包含untracked helper，普通git diff仍不含它。
+- 实现独立extent/child/count/sample/chunk/media预检，≤16MiB有界moov/实际MemoryDataSourceImpl roundtrip，UUID16+XML-only增量及仅祖先size/追加UUID字节变化证明；尾moov之外prefix流式不改。candidate→目标parent stage完整复制/验证，fresh源size/mtime/可用key/SHA后唯一ATOMIC_MOVE，postverify后才APPLIED；异常move/后验不明保留候选而不回滚或假签。ledger即时登记、可选witness、精确非递归清理，cleanup失败不撤销已验证成功。
+- 当前真实helper与1.1.7独立classpath执行243断言、六生产source外部Java21编译exit0。AVC小夹具先由独立parser验表/mdat/NAL/timing，非实际codec解码。C↔R真实双向APPLIED、幂等/根sentinel/正常残留清理/实际reopen-rename，OS NOSHARE_DELETE真实占用使UNCHANGED且保留candidate/stage；关闭该测试句柄后能rename。注入provider故障和真实OS收据分开，不拿其中之一替另一层。
+- 新布局/表计数/offset拒绝、同目标序列化、短/零IO（17次零进度停止）、create/setup/constructor-close/双close suppressed、candidate/stage腐坏、unsupported atomic/未知move/postread、源替换、已知candidate替换/cleanup错误/foreign sentinel、null-key无link可commit但不明清理保留等都有断言。受控provider仅逻辑>16MiB、物理<100B验证早拒，不是实际大视频/near-limit heap测试。
+- C1未测非AVC正例、近16MiB heap、真实FFmpeg/播放器/MC/UI/上传、OS容量/权限/卸载盘/不支持原子驱动、实际memory-only解析器内部close/constructor故障；null-key源完整digest不等于对象identity，同内容同时间替换不可观察、恶意ancestor/CAS/最终check-delete窗口仍是可信独占合同。未知盒/元数据item/codec config保守拒绝，不宣传任意单轨MP4普适可用。C2/D应明确实际支持表，并可用小合法config补非AVC结构正例，不假签真实解码。
+- C1仅helper/无plan写、无权限字段/旧证据覆盖。旧6293文件全无变化，source/plan/build493项仅helper变化；全部迭代C+R样本630文件1,406,880B，最大301638B，hardlink按路径全逻辑大小计。B54B后累计1,406,934B；C2仍≤2MiB、D预留≤7MiB，全批不超16MiB、单file≤1MiB。正常candidate删除是生产cleanup实测，不删历史失败证据腾预算。
+- C2必须使用真实helper+MetadataInjector+Folders+ready闭环，测试实际FOV/XML/pano/ODS/UTF8、一次snapshot/热更与actual root、真实APPLIED/ALREADY/UNCHANGED/INDETERMINATE影响Renderer finish/失败门与球面上传stop；不再拿B假receipt的37断言当事务集成。MC/FFmpeg/YouTube/GUI/events若边界stub或提取literal段则明确标注，尽量实际bytecode，无真实网络/进程/游戏。必要接线修复限原六source，helper默认冻结，发现核心逻辑反例先交Lead，不默默重做1125行核心或放宽支持/发布门。
+- C2与D保护原B/C1脚本/日志/fixtures及其R根，不能直接执行旧fixed-O；fresh OUTPUT_ROOT/新名/-d/tmp/sidecar全部预检。原fixture若读可能旁写必须复制到新根或生成自有小夹具；保持原错误日志。最终project build与新最终JAR/嵌套isoparser验证仍留D，不把外部javac或243断言当NeoForge/播放器接受。本批尚未完成，目标保持active/armed。
+
+C1原话：I would rather leave a clearly located verified candidate than turn an uncertain move into a reassuring lie.
+
+### 14.12 C2交接、UUID停点定性与D验收输入冻结
+
+- C2曾收到stopped通知，Lead未把它当完成；用户要求“你别急，我来恢复c2”后目标实际pause到rev2。用户恢复原C2并交付后，Lead保持暂停；收到“继续”时尝试resume被控制面明确拒绝（模型不能恢复paused目标，需用户操作），未另建目标绕过。现用户控制面已恢复并触发round1，get_goal实收rev3/active/armed；可以按既有授权进入D，不是后台完成通知自行恢复。
+- [C2报告](<C:/Temp/reforgedplay-C4b-20261116-714dc6b236b5/REPORT.md>)说明生产修改NONE、422断言和full-six external javac exit0。Lead回读报告、[原run04日志](<C:/Temp/reforgedplay-C4b-20261116-714dc6b236b5/run04/java.raw.log>)末尾TOTAL PASS422、[UUID观察receipt](<C:/Temp/reforgedplay-C4b-20261116-714dc6b236b5/observation01/actual-result.receipt.txt>)与核心624–632实际代码；本轮再次sha256sum六源均14.10/14.11指纹，HEAD仍e9e89195a25096ad17c753ba003ea3da3dbe5a3b，status只原六source＋plan，diffcheck无错。
+- **UUID停点定性：不是本候选须修复的同一球面UUID冲突。** Lead实际读取[Google Spherical Video V1规范MP4段](<https://github.com/google/spatial-media/blob/master/docs/spherical-video-rfc.md#mp4>)（[raw](<https://raw.githubusercontent.com/google/spatial-media/master/docs/spherical-video-rfc.md>)）：用于避免metadata碰撞的唯一标识必须为ffcc8263-f855-4a93-8814-587a02521fdd，UTF8 XML在此uuid leaf内。外来不同UUID即使payload恰为球面XML，仍不是这个规范标识，不应按内容猜它的类型、覆盖或删除。保持foreign字节并添加正确UUID是当前预期APPLIED；同一正确UUID且XML不同/重复/错父的UNCHANGED已有真实测试。
+- 原获批14.4/.5只以正确UUID/XML为receipt、保留无关字节，没有要求跨UUID扫描XML并将foreign内容视同同一协议。**过宽的“不同UUID/XML冲突须UNCHANGED”来自Lead给C2分片的措辞，不是用户新增要求**；C2报告称字面不满足并交Lead是正确做法。现按已批协议标识澄清，不修改生产核心、不覆写observation01、不删改已运行断言、不把其exit0的观察冒充原错误预期通过。D须独立复验foreign保持＋proper UUID注入和same-UUID冲突两相反例，可据规范复核本定性，不能凭422数目掩盖它。
+- 422实际闭环包括实际Folders单快照/热更、actual MetadataInjector mono/ODS full/crop/非整FOV XML、真实helper与1.1.7媒体前缀/offset/幂等；actualFFmpegWriter只readonly fakeProcess exit，不造真实进程；整个实际YoutubeUploader.preUpload字节码通过Unsafe避构造/反射执行，仅MP4分支，无auth/转码/网络。Renderer精确literal metadata＋邻接finish/Post＋actualsetFailure等提取边界，不是完整renderVideo/游戏/GUI或真实events。B假receipt不在C2 runtimeclasspath，不能混称其37断言为事务证据。
+- 真APPLIED/ALREADY、unsupported布局/源已证未变UNCHANGED、unknown-move/postverify INDETERMINATE、cleanup-warning/no-link保留、source/candidate/stage替换等actualprovider结果贯通render分流和sphereupload两种request flag；失败必finish/Post且不成功UI。所有providerFileChannel关闭；注入非真实OS认证。实际facade C↔R双向成功和root/sentinel/正常清理新执行；C1Windows NOSHARE_DELETE只是明确历史引用，未重跑冒称C2。非sphere不碰metadata设置或网络。
+- C2旧7392文件与workspace1348文件零变化，未带权限字段/旧脚本执行或覆盖旧证据。初次driver NUL/GBK读取/错误cwd断言/provider-root错误/javap argfile不支持等失败均保留，修的是外部夹具/调用，不改业务源码/强条件。C2全部585 synthetic路径741579B、max14357B，B54+C1 1406880+C2 741579=2,148,513B；D预算仍≤7MiB、single≤1MiB，加起来9,488,545B＜16MiB，留余量不删旧证据。code/classes/log另记。
+- C2表明实际接受/拒绝集：前置/碎片/多轨/音频/未知结构表/未知metadata key可能拒绝，codec条目虽含AVC/HEVC/VP9/AV1/MP4V，当前正例只有AVC；后四非AVC合法正例/解码、近16MiB physical-moov heap、真实FFmpeg产物/播放器/MC/UI/网络、memory-only parser内部constructor/close故障/真实容量ACL/卸载盘/恶意ancestor/CAS/断电持久化均未测，不隐瞒为“所有尾moov单轨都能成功”。D须检查安全性与声明边界，不能合成AVC载荷套另一config就假签nonAVC合法媒体。
+- **D只读所有生产source与plan**，独立审查/新执行核心243＋真实集成422及UUID两方向、已有弱处/故障/容量边界/精确清理/ready和finish门；独占新C输出与唯一R私有根、全部写目标预检/old-before-after audit，不直接跑旧fixed-O或覆写旧失败。Source/default fixture/classes来自fresh编译，不依赖B占位/旧receipt。发现真实bug给证据交Lead/C，不“边验边修”或偷偷扩大格式/白名单。
+- D最终专用mc_gradle task=build args=["-Djava.io.tmpdir=C:\\Temp","--console=plain"] timeout1200000，不clean/refresh/跳test/任务注入/改构建依赖，NO-SOURCE不是JUnit通过。新最终non-dev-shadow JAR核对当前helper/六类/结果与ready方法/移除旧截断路径及实际isoparser嵌套classes；可snapshot旧artifact对未改第三批Mixins/Full/Bridge来源做回归核对，但别拿旧Jar替代本次构建。验证层次与未测层分列；独立PASS后Lead才完整六source真实diff收尾、停等人commit，当前未完成目标。
+
+C2原话：I would rather leave one clearly described semantic gate unresolved than silently call a different UUID the same promise.
+
+### 14.13 首轮D无报告中断的可核实停点与原阶段重试
+
+- 首D代理9572be0a-44f2-4473-bbf1-7a1a75d64013收到failed-before-finished通知，无closing message或最终REPORT；不推断它已完成独立review/build/产物验证，也不以通知“失败”反推生产编译坏。Lead随后job_list为空，六source SHA仍14.10/.11，status仍仅原六source＋计划、diffcheck通过，未启动并行writer。
+- 只读发现其唯一C根[C:/Temp/reforgedplay-D4-20261116-1909-bc591a7e](<C:/Temp/reforgedplay-D4-20261116-1909-bc591a7e/>)；[preflight](<C:/Temp/reforgedplay-D4-20261116-1909-bc591a7e/preflight.json>)的R例外为R:/Temp/reforgedplay-D4-bc591a7e-529a-4642-8992-62946782b173，core和integration的R记录指同一根。Lead未执行其fixed-root driver、未改其文件；读driver只用于判定已跑/未证层和恢复保护边界。
+- [core01原java日志](<C:/Temp/reforgedplay-D4-20261116-1909-bc591a7e/core01/java.raw.log>)TOTAL PASS243、[java.exit](<C:/Temp/reforgedplay-D4-20261116-1909-bc591a7e/core01/java.exit.txt>)=0；[integration01原java日志](<C:/Temp/reforgedplay-D4-20261116-1909-bc591a7e/integration01/java.raw.log>)TOTAL PASS422、[java.exit](<C:/Temp/reforgedplay-D4-20261116-1909-bc591a7e/integration01/java.exit.txt>)=0；[full-six01 javac.exit](<C:/Temp/reforgedplay-D4-20261116-1909-bc591a7e/full-six01/javac.exit.txt>)=0。这些是可核实的本轮D部分执行收据，尚需后继核源snapshot/argv/CP/边界，不伪装成最终签名。
+- 未找到最终REPORT、完整sealed保护/预算审计或最终构建/新artifact收据；不把未找到直接说“绝未运行过”，后继须核实。恢复D必须先审计首D全部C+R retainedsamples并计入D累计7MiB，旧B/C累计2,148,513B仍分别保留，不拿新根重新清零预算。新D独占新输出和唯一新R根，不在首D原名下补跑/改脚本/伪造其收尾报告，不删旧材料腾budget。
+- 继续使用subagent_mc_verify重委派同一D阶段，不跳C/D顺序、不降验证门。默认当前sixsource/plan全只读；先核旧D old-before/workspace-before，外部证据必须无改。Lead本次top/14.13是首D失败后有明确授权的计划收据变化，不能混成D期间源码修改；生产六源应全无变化。后继开始时再freeze现在plan/整个workspace，Lead在其执行期间不写source/plan。
+- 原14.12 UUID定性、所有原安全/审查/actual243/422/两方向UUID/真实C↔R/OS共享锁/最终专用build及newJAR gates不变。后继可在预算允许下fresh重跑全套；若引用首D已核hash相符的部分执行，精确列历史/本次新执行，不谎称又跑过。完整build/新artifact门必须有本候选真实收据，没有才补专用mc_gradle，不按猜测填success。真实回归先交Lead/C；工具/框架中断不当业务PASS/FAIL，原失败通知与文件均保留。
+
+### 14.14 Lead协助D恢复的实际完整构建收据（不是独立验收签名）
+
+- 为防再次中断使关键构建无收据，Lead在首D结束、job_list为空且source六hash不变后，亲调用专用mc_gradle(projectDir=C:/Users/zhenz/Desktop/ReForgedPlay-1.21, task=build, args=["-Djava.io.tmpdir=C:\\Temp","--console=plain"], timeout1200000)。没有并行writer、clean/refresh/-x/testskip/Gradle注入或构建依赖修改。
+- 实际工具输出：**BUILD SUCCESSFUL in 59s；6 actionable tasks：4 executed、2 up-to-date**。compileJava/jar/shadowJar/remapJar执行，processResources/processIncludeJars UP-TO-DATE；compileTestJava/processTestResources/test/validateAccessWidener NO-SOURCE，remapSourcesJar SKIPPED；NO-SOURCE不是JUnit成功。工具仅可见文本，未虚构独立exitCode/timedOut字段或rawstdout文件。
+- 实际Loom1.7.435/Gradle8.8，启动新daemon，三个既有Thread.stop/Object.finalize移除warning重现，部分中文诊断编码乱码原样；旧WorldRenderer$ChunkInfo/getChunk和JOML Matrix4f/Matrix4fStack remap诊断、旧Loom/Gradle deprecation仍输出。构建成功不表示这些旧诊断已修，也不签游戏/实际Mixins全模组加载。
+- Lead亲跑sha256sum/wc -c：[新non-dev-shadow JAR](<build/libs/reforgedplaymod-1.21.1-0.3.1.jar>)为17,521,960B，SHA256=358d39385591675fcb875cb6ac2ffbb946ca79ba816f0576342158c4d7b42612。构建后status仍原六源码＋plan，diffcheck无错误。
+- 此构建是D恢复阶段的Lead协助证据，不能冒充首D已跑或后继D亲跑；后继须独立审查当前源码、核真实daemon若需要、验证这个新artifact/嵌套依赖并执行必要purehelper正负例。无候选变化且artifact可核时不必为凑次数重复build；若发现需要修复，原范围C修完后最终build仍须重新执行。D整体尚未PASS，source/plan从本段记录后冻结等待后继交接。
+
+### 14.15 D恢复阶段PASS及Lead第四批最终源码提交检查点
+
+**结论：本批已批准的源码实现、隔离生产逻辑验证、真实C/R与新最终构建产物门通过；可交用户审查并自行提交六源码＋计划。不是实际FFmpeg/播放器/NeoForge全模组/世界UI/网络上传验收，AI不安装/commit，不继续下一批。**
+
+#### 精确源码范围与真实diff
+
+Lead回读[D恢复阶段完整报告](<C:/Temp/reforgedplay-D4R-20261116-1921-a1c8742f/REPORT.md>)、[证据索引](<C:/Temp/reforgedplay-D4R-20261116-1921-a1c8742f/EVIDENCE-INDEX.md>)、[seal-summary](<C:/Temp/reforgedplay-D4R-20261116-1921-a1c8742f/seal-summary.json>)、新artifact运行日志/UUID正反日志，重读实际helper83–214整个apply及先前ledger/validator关键段，并逐段读五既有源码完整diff。D逐段完整review helper1125行，是独立审查层，不冒称Lead重新逐行通读全部核心或重跑全部用例。
+
+| 源码 | 相对HEADe9e8919的真实+/- | 本批职责 |
+| --- | --- | --- |
+| [ReplayFoldersService.java](<src/main/java/com/replaymod/core/files/ReplayFoldersService.java>) | +22/-0 | 视频tempPath单次快照；原图片/资源ZIP/raw/cache方法未改 |
+| [MetadataInjector.java](<src/main/java/com/replaymod/render/metadata/MetadataInjector.java>) | +25/-65 | 移除截断原视频路径；保留void兼容、增加实际结果入口、UUID16/XMLUTF8 |
+| [VideoMetadataTask.java](<src/main/java/com/replaymod/render/metadata/VideoMetadataTask.java>) | 新增1125行 | 有界尾moov处理、精确媒体不变证明、候选/stage/原子发布/验证结果/清理 |
+| [FFmpegWriter.java](<src/main/java/com/replaymod/render/FFmpegWriter.java>) | +15/-0 | 只读exit0且未abort的就绪门，不改进程退出/关闭策略 |
+| [VideoRenderer.java](<src/main/java/com/replaymod/render/rendering/VideoRenderer.java>) | +30/-3 | metadata就绪/实际路径门与真实结果分流，保留finish/Post |
+| [YoutubeUploader.java](<src/main/java/com/replaymod/extras/youtube/YoutubeUploader.java>) | +11/-4 | 球面preUpload只接受验证成功结果，不用请求开关冒充receipt |
+
+实现合计+1228/-72；计划另计。普通git diff不含untracked新helper，不能用tracked统计冒称全六source。当前status仅五modified source＋新增helper＋plan；HEAD仍e9e89195a25096ad17c753ba003ea3da3dbe5a3b，无Git写、无额外source/config/dependency/test/wrapper/env/GUI修改。
+
+Lead亲核六source hash均14.10/14.11值，生成[完整六source真实patch](<C:/Temp/reforgedplay-Lead4-final-69b47e12/six-source.patch>)，含五tracked git diff与新helper no-index真实diff，75807B，SHA256=af48a6b2a0dc74e899ea44c326991425bc2226bb6d6b293f68ba17246cb47e5a；[六source指纹](<C:/Temp/reforgedplay-Lead4-final-69b47e12/six-source.sha256>)另存。没有Git index/commit写；no-index正常差异exit1不是失败。计划不含在该sourcepatch中，以本文件/最终plan.patch为准。
+
+#### 实际验证、归属与最终产物
+
+- C1实际243断言/C2实际422断言后，首D又对当前源码fresh core243＋真实integration422＋fullsix外部javac全部exit0；中断通知没有抹掉这些实际原日志。D重试核source snapshots/CP/generated提取/测试未弱化，明确归首D执行，不伪说本次重跑422。
+- D重试另执行**新最终JAR优先classpath purehelper243＋UUID正反23**，均javac/java exit0；没有编生产Task到harnessclasses遮盖artifact。实际Task CodeSource来自最终Jar，core新C↔R与Windows共享删除锁/faultprovider/句柄close/材料保留/精确清理都在所列用例中。UUID foreign内容字节保持＋proper追加是APPLIED；proper相同内容ALREADY、冲突/dup/misplaced均UNCHANGED/原hash完整，14.12停点有独立反向证明，不靠修改旧观察凑绿。
+- Lead实际专用完整build见14.14：**59s成功，6 tasks：4 executed、2 up-to-date**；test NO-SOURCE不是JUnit通过，旧三removal与remap/Loom/Gradle诊断未顺手修。D只沿用并核这真实Lead构建，不冒称D亲跑，不重建同hash产物凑次数。
+- **最终non-dev-shadow [JAR](<build/libs/reforgedplaymod-1.21.1-0.3.1.jar>)**：17,521,960B，SHA256=358d39385591675fcb875cb6ac2ffbb946ca79ba816f0576342158c4d7b42612，Lead收尾再次亲跑sha256sum/wc -c与Dseal一致。D实际核六classes/Result/ready/public描述、原截断路径移除、实际1.1.7嵌套478classes与cache一致；第三批未改Full/Bridge/Mixins class与先前artifact一致，Folders原方法/其他非metadata逻辑不被牵动。不把嵌套classes一致当NeoForge全模组加载接受。
+- Renderer执行证据仍为精确literal边界＋actualsetFailure等方法，不是whole renderVideo/UI/events；preUpload是整个实际类/MP4分支经Unsafe避构造，真实helper结果驱动，但非MP4转码/网络auth/upload没启动。fakeProcess仅只读状态门、provider故障仅注入层。保留这些边界而不是用漂亮PASS盖掉。
+
+#### 保护、预算、限制及下一步
+
+- Dseal共9,942旧保护文件、2,503工作区文件，changed/removed/added全空，source/plan/newartifact/R sentinel未变；Lead此后只改本计划和写外部diff收据，生产六source无变化。无权限升级字段/Git写/装包/旧证据覆盖或伪恢复，所有driver辅助失败和首D无报告通知如实保留。
+- 首D＋D重试727条sample路径1,603,263B，全第四批B/C/D累计**3,751,776B＜16MiB**，最大301638B＜1MiB；硬链接逐路径逻辑大小保守计数，代码/classes/JAR/log另列。未删历史失败材料腾预算，不宣称第三批或所有历史外部文件也在该数内；Lead收尾仅差异/文档，不加样本。
+- 此小片**只支持保守验证通过的尾moov、单video轨、nonfragmented subset，moov≤16MiB**；前置moov、碎片、多轨/音频、外部引用、未知结构/config/metadata等可被明确UNCHANGED拒绝，原视频保持。codec实现分支不限AVC但正例仅AVC，nonAVC合法媒体正例/任何真实解码、near16MiB physical-moov heap、memory-only parser内部构造close故障仍未测，不能宣传所有单轨MP4通用。
+- tempPath候选和目标卷stage各约N额外空间且可能两份写入；目标盘不支持原子替换则不非原子fallback。独占closed-input/可信parent合同、null-key source相同内容同时间替换不可观察、目录marker不是inode、finalcheck-move/delete窗口/hostileancestor/CAS/断电持久化无保证。无有效cleanup凭据时诊断保留而不阻断已验证metadata成功，不承诺任意RAMDisk都即时删尽。
+- **真实FFmpeg产物/进程、播放器/codec解码、NeoForge全模组加载、whole world/GUI/render queue/events、真实网络/auth/upload、nonMP4转码、OS满盘/ACL/卸载卷/不支持atomic驱动仍UNTESTED。** 后续人工另行授权后先用可丢弃短MP4看metadata/真实播放/实际输出就绪与渲染队列，不用用户唯一视频或录制做故障试验。本批未运行这些，不签“可以直接装/实际可播”。
+- 本批到此停等用户审查六源码＋计划并自行commit（别漏新增helper）。AI不Git add/commit/push/reset/checkout，不复制到mods/安装、不自动进入native/cache/raw/tmp/保存恢复下一批。收尾核查后按控制面规则将活跃目标标complete以停止自动续作；没有目标历史物理删除工具，不假称已删除物理历史记录。
+
+D重试原话：我宁愿把“由谁运行、验证到哪一层”写清楚，也不让一个漂亮的 PASS 替代缺失的证据。

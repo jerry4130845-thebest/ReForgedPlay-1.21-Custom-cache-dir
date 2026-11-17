@@ -152,6 +152,21 @@ public class FFmpegWriter implements FrameConsumer<BitmapFrame> {
         aborted = true;
     }
 
+    /**
+     * Project-owned read-only gate for metadata work, not a close/flush operation.
+     * Never waits, destroys the process, reads its pipes, or changes writer state.
+     * Call only after the pipeline has stopped submitting frames. Exit zero is
+     * necessary, not proof that the output path/container is valid or exclusive.
+     */
+    public boolean isVideoMetadataReady() {
+        if (aborted) return false;
+        try {
+            return process.exitValue() == 0;
+        } catch (IllegalThreadStateException stillRunning) {
+            return false;
+        }
+    }
+
     public File getVideoFile() throws FFmpegStartupException {
         String log = ffmpegLog.toString();
         for (String line : log.split("\n")) {

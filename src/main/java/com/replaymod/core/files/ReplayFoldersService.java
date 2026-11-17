@@ -23,6 +23,28 @@ public class ReplayFoldersService {
     }
 
     /**
+     * Project-owned video API: snapshot TEMP_PATH once, without allocating a task.
+     * Null means the JDK default temp selection; explicit roots never fall back.
+     * Relative paths resolve against mcDir. Nonblank values are not trimmed.
+     */
+    public Path snapshotVideoMetadataTempRoot() throws IOException {
+        String configured = null;
+        Path root = null;
+        try {
+            configured = settings.get(Setting.TEMP_PATH);
+            if (configured == null || configured.isBlank()) return null;
+            root = Path.of(configured);
+            if (!root.isAbsolute() && root.getRoot() != null) {
+                throw new IOException("Drive-relative or root-relative tempPath is not supported");
+            }
+            return mcDir.resolve(root).toAbsolutePath().normalize();
+        } catch (IOException | InvalidPathException | UnsupportedOperationException | SecurityException failure) {
+            throw new IOException("Cannot snapshot video metadata tempPath=" + configured
+                    + "; phase=parse/resolve; resolved root=" + root, failure);
+        }
+    }
+
+    /**
      * Creates one image task from a single TEMP_PATH setting snapshot. Blank means JDK
      * default temp; relative paths resolve against mcDir, never the process cwd.
      * Invalid/drive-relative paths and IO failures must fail without a fallback.

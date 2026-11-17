@@ -26,6 +26,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import com.replaymod.render.RenderSettings;
 import com.replaymod.render.metadata.MetadataInjector;
+import com.replaymod.render.metadata.VideoMetadataTask;
 import de.johni0702.minecraft.gui.utils.NonNull;
 import net.minecraft.client.MinecraftClient;
 import org.apache.commons.exec.CommandLine;
@@ -187,10 +188,16 @@ public class YoutubeUploader {
                 }
             }
 
-            if (!settings.isInjectSphericalMetadata() || !isMp4) {
-                MetadataInjector.injectMetadata(settings.getRenderMethod(), outputFile,
-                        settings.getTargetVideoWidth(), settings.getTargetVideoHeight(),
-                        settings.getSphericalFovX(), settings.getSphericalFovY());
+            // A render request flag is not a receipt. Always validate/inject idempotently.
+            VideoMetadataTask.Result metadata = MetadataInjector.injectMetadataWithResult(
+                    settings.getRenderMethod(), outputFile,
+                    settings.getTargetVideoWidth(), settings.getTargetVideoHeight(),
+                    settings.getSphericalFovX(), settings.getSphericalFovY());
+            if (!metadata.metadataPresent()) {
+                throw metadata.asIOException();
+            }
+            if (!metadata.cleanupDiagnostics().isEmpty()) {
+                LOGGER.warn("Spherical metadata confirmed with retained materials: {}", metadata);
             }
         }
 

@@ -22,6 +22,7 @@ import com.replaymod.render.gui.GuiVideoRenderer;
 import com.replaymod.render.gui.progress.VirtualWindow;
 import com.replaymod.render.hooks.ForceChunkLoadingHook;
 import com.replaymod.render.metadata.MetadataInjector;
+import com.replaymod.render.metadata.VideoMetadataTask;
 import com.replaymod.render.mixin.WorldRendererAccessor;
 import com.replaymod.render.utils.EmbeddiumFlawlessFramesHelper;
 import com.replaymod.render.utils.SodiumFlawlessFramesHelper;
@@ -237,9 +238,35 @@ public class VideoRenderer implements RenderInfo {
         }
 
         if (settings.isInjectSphericalMetadata()) {
-            MetadataInjector.injectMetadata(settings.getRenderMethod(), settings.getOutputFile(),
-                    settings.getTargetVideoWidth(), settings.getTargetVideoHeight(),
-                    settings.getSphericalFovX(), settings.getSphericalFovY());
+            if (cancelled || hasFailed() || ffmpegWriter == null || !ffmpegWriter.isVideoMetadataReady()) {
+                LOGGER.warn("Spherical metadata skipped: render cancelled/failed or writer not exited with zero status");
+            } else {
+                try {
+                    java.io.File actualOutput = ffmpegWriter.getVideoFile();
+                    if (!actualOutput.toPath().toRealPath().equals(settings.getOutputFile().toPath().toRealPath())) {
+                        LOGGER.warn("Spherical metadata skipped: actual output {} differs from expected {}",
+                                actualOutput, settings.getOutputFile());
+                    } else {
+                        VideoMetadataTask.Result result = MetadataInjector.injectMetadataWithResult(
+                                settings.getRenderMethod(), actualOutput,
+                                settings.getTargetVideoWidth(), settings.getTargetVideoHeight(),
+                                settings.getSphericalFovX(), settings.getSphericalFovY());
+                        switch (result.status()) {
+                            case APPLIED, ALREADY_PRESENT -> {
+                                if (!result.cleanupDiagnostics().isEmpty()) {
+                                    LOGGER.warn("Spherical metadata confirmed with retained materials: {}", result);
+                                }
+                            }
+                            case UNCHANGED -> LOGGER.warn("Spherical metadata NOT applied; original video unchanged: {}", result);
+                            case INDETERMINATE -> setFailure(result.asIOException());
+                        }
+                    }
+                } catch (IOException | RuntimeException failure) {
+                    // No receipt: conservatively fail, but still run finish and Post below.
+                    setFailure(new IOException("Spherical metadata state not confirmed; output="
+                            + settings.getOutputFile(), failure));
+                }
+            }
         }
 
         finish();
