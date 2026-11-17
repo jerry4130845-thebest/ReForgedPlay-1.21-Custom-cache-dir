@@ -3,7 +3,8 @@ package com.replaymod.replay;
 import com.github.steveice10.packetlib.io.NetOutput;
 import com.github.steveice10.packetlib.tcp.io.ByteBufNetOutput;
 import com.google.common.base.Preconditions;
-import com.google.common.io.Files;
+import com.replaymod.core.files.ReplayFoldersService.ResourcePackLease;
+import com.replaymod.core.files.ReplayResourcePackReleaseBridge;
 import com.replaymod.core.ReplayMod;
 import com.replaymod.core.mixin.MinecraftAccessor;
 import com.replaymod.core.mixin.TimerAccessor;
@@ -25,7 +26,9 @@ import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
+import io.netty.util.ReferenceCountUtil;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.resource.server.ServerResourcePackLoader;
 import net.minecraft.client.gui.screen.DownloadingTerrainScreen;
 import net.minecraft.client.gui.screen.NoticeScreen;
 import net.minecraft.client.world.ClientWorld;
@@ -42,7 +45,6 @@ import net.minecraft.network.packet.s2c.login.LoginSuccessS2CPacket;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.Vec3d;
 import net.neoforged.neoforge.network.payload.AdvancedOpenScreenPayload;
-import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 
 //#if MC>=12002
@@ -116,6 +118,8 @@ import net.minecraft.network.NetworkSide;
 //#endif
 
 import java.io.*;
+import java.nio.file.Path;
+import java.util.UUID;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -123,6 +127,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static com.replaymod.core.utils.Utils.DEFAULT_MS_PER_TICK;
 import static com.replaymod.core.versions.MCVer.*;
@@ -182,7 +187,7 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
      * When in sync mode, no packets will be sent until {@link #sendPacketsTill(int)} is called.
      * This is used during path playback and video rendering.
      */
-    protected boolean asyncMode;
+    protected volatile boolean asyncMode;
 
     /**
      * Timestamp of the last packet sent in milliseconds since the start.
@@ -224,12 +229,13 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
     /**
      * Whether we need to restart the current replay. E.g. when jumping backwards in time
      */
-    protected boolean startFromBeginning = true;
+    protected volatile boolean startFromBeginning = true;
+    private volatile boolean restartPending;
 
     /**
      * Whether to terminate the replay. This only has an effect on the async mode and is {@code true} during sync mode.
      */
-    protected boolean terminate;
+    protected volatile boolean terminate;
 
     /**
      * The speed of the replay. 1 is normal, 2 is twice as fast, 0.5 is half speed and 0 is frozen
@@ -268,10 +274,19 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
      */
     protected boolean allowMovement;
 
-    /**
-     * Directory to which resource packs are extracted.
-     */
-    private final File tempResourcePackFolder = Files.createTempDir();
+    /** One lazy task and one settings snapshot for this sender, including every seek. */
+    private final ResourcePackLease resourcePackLease;
+    private final AtomicBoolean terminal = new AtomicBoolean();
+    private final AtomicBoolean terminationCleaned = new AtomicBoolean();
+    private final Object modeLock = new Object();
+    private volatile long asyncEpoch;
+    private volatile Thread asyncWorker;
+    // A forward rush supersedes UI/control intentions, not the current stream's legal packets.
+    private final AtomicLong controlEpoch = new AtomicLong();
+    private long replayInGeneration;
+    // Carry the generation captured when bytes were read through synchronous Netty decoding.
+    // A seek while an async packet is sleeping must not give that old resource request a new epoch.
+    private final ThreadLocal<Long> dispatchGeneration = new ThreadLocal<>();
 
     private final EventHandler events = new EventHandler();
 
@@ -283,11 +298,19 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
         this.replayHandler = replayHandler;
         this.replayFile = file;
         this.replayLength = file.getMetaData().getDuration();
-
-        events.register();
+        this.resourcePackLease = ReplayMod.instance.folders.createResourcePackLease();
+        try {
+            ReplayResourcePackReleaseBridge.attach(resourcePackLease, mc);
+            events.register();
+        } catch (RuntimeException | Error failure) {
+            try { terminateReplay(); }
+            catch (RuntimeException | Error cleanup) { if (failure != cleanup) failure.addSuppressed(cleanup); }
+            throw failure;
+        }
     }
 
     public void setChannel(Channel channel) {
+        if (this.channel != null && this.channel != channel) advancePacketGeneration();
         this.channel = channel;
     }
 
@@ -299,13 +322,16 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
      */
     @Override
     public void setAsyncMode(boolean asyncMode) {
-        if (this.asyncMode == asyncMode) return;
-        this.asyncMode = asyncMode;
-        if (asyncMode) {
-            this.terminate = false;
-            new Thread(asyncSender, "replaymod-async-sender").start();
-        } else {
-            this.terminate = true;
+        synchronized (modeLock) {
+            if (terminal.get() || this.asyncMode == asyncMode) return;
+            controlEpoch.incrementAndGet();
+            this.asyncMode = asyncMode;
+            this.terminate = !asyncMode;
+            long workerEpoch = ++asyncEpoch;
+            if (asyncMode) {
+                asyncWorker = new Thread(() -> runAsyncSender(workerEpoch), "replaymod-async-sender");
+                asyncWorker.start();
+            }
         }
     }
 
@@ -321,11 +347,17 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
      */
     @Override
     public void setSyncModeAndWait() {
-        if (!this.asyncMode) return;
-        this.asyncMode = false;
-        this.terminate = true;
-        synchronized (this) {
-            // This will wait for the worker thread to leave the synchronized code part
+        Thread worker = asyncWorker;
+        setAsyncMode(false);
+        // Preserve this explicit mode-switch wait, but service runSync callbacks rather than
+        // blocking the client on the sender monitor. Final termination never waits here.
+        while (worker != null && worker.isAlive()) {
+            executeTaskQueue();
+            try { Thread.sleep(0, 100_000); }
+            catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
+            }
         }
     }
 
@@ -348,19 +380,57 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
      * Terminate this replay sender.
      */
     public void terminateReplay() {
-        if (terminate) {
-            return;
-        }
-        terminate = true;
-        syncSender.shutdown();
-        events.unregister();
+        Throwable failure = null;
         try {
-            channel.pipeline().fireChannelInactive();
-            channel.pipeline().close();
-            FileUtils.deleteDirectory(tempResourcePackFolder);
-        } catch(Exception e) {
-            e.printStackTrace();
+            try { stopResourceProduction(); }
+            catch (RuntimeException | Error e) { failure = e; }
+            if (terminationCleaned.compareAndSet(false, true)) {
+                try { syncSender.shutdown(); }
+                catch (RuntimeException | Error e) { failure = collectFailure(failure, e); }
+                try { events.unregister(); }
+                catch (RuntimeException | Error e) { failure = collectFailure(failure, e); }
+                Channel ownedChannel = channel;
+                if (ownedChannel != null) {
+                    try { ownedChannel.pipeline().fireChannelInactive(); }
+                    catch (RuntimeException | Error e) { failure = collectFailure(failure, e); }
+                    try { ownedChannel.pipeline().close(); }
+                    catch (RuntimeException | Error e) { failure = collectFailure(failure, e); }
+                }
+            }
+        } finally {
+            try { ReplayResourcePackReleaseBridge.requestRelease(resourcePackLease); }
+            catch (RuntimeException | Error e) { failure = collectFailure(failure, e); }
         }
+        if (failure instanceof Error error) throw error;
+        if (failure instanceof RuntimeException error) throw error;
+    }
+
+    /** Irreversible production stop, separate from both mode switching and general cleanup. */
+    void stopResourceProduction() {
+        synchronized (modeLock) {
+            // Close the lease's publication/admission gate before exposing terminal=true;
+            // otherwise a producer could publish in the gap between those two writes.
+            try { resourcePackLease.stop(); }
+            finally {
+                terminal.set(true);
+                terminate = true;
+                ++asyncEpoch;
+                if (asyncWorker != null) asyncWorker.interrupt();
+            }
+        }
+    }
+
+    boolean isTerminal() { return terminal.get(); }
+
+    void advancePacketGeneration() {
+        controlEpoch.incrementAndGet();
+        if (!terminal.get()) resourcePackLease.advanceGeneration();
+    }
+
+    private static Throwable collectFailure(Throwable primary, Throwable next) {
+        if (primary == null) return next;
+        if (primary != next) primary.addSuppressed(next);
+        return primary;
     }
 
     private class EventHandler extends EventRegistrations {
@@ -388,7 +458,8 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
     public void channelRead(ChannelHandlerContext ctx, Object msg)
             throws Exception {
         // When in async mode and the replay sender shut down, then don't send packets
-        if(terminate && asyncMode) {
+        if (terminal.get() || ctx.channel() != channel || (terminate && asyncMode)) {
+            ReferenceCountUtil.release(msg);
             return;
         }
 
@@ -399,6 +470,10 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                 if (p != null) {
                     p = processPacket(p);
                     if (p != null) {
+                        if (terminal.get() || ctx.channel() != channel) {
+                            ReferenceCountUtil.release(p);
+                            return;
+                        }
                         super.channelRead(ctx, p);
                     }
 
@@ -425,9 +500,9 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                             }
                         };
                         if (mc.isOnThread()) {
-                            doLightUpdates.run();
+                            guardPacketCallback(doLightUpdates).run();
                         } else {
-                            mc.send(doLightUpdates);
+                            mc.send(guardPacketCallback(doLightUpdates));
                         }
                     }
                     //#endif
@@ -465,12 +540,12 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
             return; // don't want to do it too often, only when there's likely to be a dead entity
         }
 
-        mc.send(() -> {
+        mc.send(guardPacketCallback(() -> {
             ClientWorld world = mc.world;
             if (world != null) {
                 removeDeadEntities(world);
             }
-        });
+        }));
     }
 
     private void removeDeadEntities(ClientWorld world) {
@@ -513,6 +588,7 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
      * @return The processed packet or {@code null} if no packet shall be sent
      */
     protected Packet processPacket(Packet p) throws Exception {
+        if (terminal.get()) return null;
         if (p instanceof LoginSuccessS2CPacket) {
             registry = registry.withLoginSuccess();
             return p;
@@ -539,12 +615,17 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                     // Failed to parse options, make sure that under no circumstances further packets are parsed
                     terminateReplay();
                     // Then end replay and show error GUI
+                    ServerResourcePackLoader loader = mc.getServerResourcePackProvider();
+                    long connectionEpoch = ReplayResourcePackReleaseBridge.connectionEpoch(loader);
                     ReplayMod.instance.runLater(() -> {
+                        if (!replayHandler.ownsFullReplaySender(this)
+                                || ReplayResourcePackReleaseBridge.connectionEpoch(loader) != connectionEpoch) return;
                         try {
                             replayHandler.endReplay();
                         } catch (IOException e) {
                             e.printStackTrace();
                         }
+                        if (ReplayModReplay.instance.getReplayHandler() != null) return;
                         mc.setScreen(new NoticeScreen(
                                 //#if MC>=11400
                                 () -> mc.setScreen(null),
@@ -559,6 +640,7 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                 }
             }
         }
+        if (terminal.get()) return null;
         if (p instanceof DisconnectS2CPacket) {
             Text reason = ((DisconnectS2CPacket) p).reason();
             String message = reason.getString();
@@ -615,22 +697,9 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
         //$$     if ("MC|RPack".equals(channelName) &&
         //$$             (url = new String(packet.func_149168_d(), Charsets.UTF_8)).startsWith("replay://")) {
         //#endif
-                int id = Integer.parseInt(url.substring("replay://".length()));
-                Map<Integer, String> index = replayFile.getResourcePackIndex();
-                if (index != null) {
-                    String hash = index.get(id);
-                    if (hash != null) {
-                        File file = new File(tempResourcePackFolder, hash + ".zip");
-                        if (!file.exists()) {
-                            IOUtils.copy(replayFile.getResourcePack(hash).get(), new FileOutputStream(file));
-                        }
-                        //#if MC>=12003
-                        schedulePacketHandler(() -> mc.getServerResourcePackProvider().addResourcePack(packet.id(), file.toPath()));
-                        //#else
-                        //$$ setServerResourcePack(file);
-                        //#endif
-                    }
-                }
+                // A replay URL is always consumed here, including invalid/missing/failed packs.
+                // It must never fall back to vanilla's URL downloader with a partial ZIP.
+                sendResourcePack(url, packet.id());
                 return null;
             }
         }
@@ -809,12 +878,12 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
             final PlayerPositionLookS2CPacket ppl = (PlayerPositionLookS2CPacket) p;
             if(!hasWorldLoaded) hasWorldLoaded = true;
 
-            ReplayMod.instance.runLater(() -> {
+            ReplayMod.instance.runLater(guardControlCallback(() -> {
                 if (mc.currentScreen instanceof DownloadingTerrainScreen) {
                     // Close the world loading screen manually in case we swallow the packet
                     mc.setScreen(null);
                 }
-            });
+            }));
 
             if(replayHandler.shouldSuppressCameraMovements()) return null;
 
@@ -842,10 +911,15 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
             }
             //#endif
 
-            schedulePacketHandler(new Runnable() {
+            scheduleControlHandler(new Runnable() {
+                private final long intention = controlEpoch.get();
+                private final long generation = packetGeneration();
+                private final ServerResourcePackLoader loader = mc.getServerResourcePackProvider();
+                private final long connectionEpoch = ReplayResourcePackReleaseBridge.connectionEpoch(loader);
                 @Override
                 @SuppressWarnings("unchecked")
                 public void run() {
+                    if (controlEpoch.get() != intention || !callbackCurrent(generation, loader, connectionEpoch)) return;
                     // FIXME: world shouldn't ever be null at this point, now that we use the packet queue
                     //        probably fine to remove on the next non-patch version (don't want to break stuff now)
                     if (mc.world == null || !mc.isOnThread()) {
@@ -912,7 +986,7 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
             return processPacketAsync(p);
         } else {
             Packet fp = p;
-            mc.send(() -> processPacketSync(fp));
+            mc.send(guardPacketCallback(() -> processPacketSync(fp)));
             return p;
         }
     }
@@ -986,18 +1060,23 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
      * There is no waiting performed until a packet with at least this timestamp is reached (but not yet sent).
      * If this is -1, then timing is normal.
      */
-    private long desiredTimeStamp = -1;
+    private volatile long desiredTimeStamp = -1;
 
     /**
      * Runnable which performs timed dispatching of packets from the input stream.
      */
-    private Runnable asyncSender = new Runnable() {
-        public void run() {
+    private boolean asyncStopped(long workerEpoch) {
+        return terminal.get() || terminate || workerEpoch != asyncEpoch;
+    }
+
+    private void runAsyncSender(long workerEpoch) {
             try {
                 REPLAY_LOOP:
-                while (!terminate) {
+                while (!asyncStopped(workerEpoch)) {
                     synchronized (FullReplaySender.this) {
+                        if (asyncStopped(workerEpoch)) return;
                         if (replayIn == null) {
+                            replayInGeneration = resourcePackLease.generation();
                             replayIn = replayFile.getPacketData(getPacketTypeRegistry(State.LOGIN));
                         }
                         // Packet loop
@@ -1006,13 +1085,13 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                                 // When playback is paused and the world has loaded (we don't want any dirt-screens) we sleep
                                 while (paused() && hasWorldLoaded && !inBundle) {
                                     // Unless we are going to terminate, restart or jump
-                                    if (terminate || startFromBeginning || desiredTimeStamp != -1) {
+                                    if (asyncStopped(workerEpoch) || startFromBeginning || desiredTimeStamp != -1) {
                                         break;
                                     }
                                     Thread.sleep(10);
                                 }
 
-                                if (terminate && !inBundle) {
+                                if (terminal.get() || (asyncStopped(workerEpoch) && !inBundle)) {
                                     break REPLAY_LOOP;
                                 }
 
@@ -1025,7 +1104,7 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
 
                                 // Read the next packet if we don't already have one
                                 if (nextPacket == null) {
-                                    nextPacket = new FullReplaySender.PacketData(replayIn);
+                                    nextPacket = new FullReplaySender.PacketData(replayIn, replayInGeneration);
                                 }
 
                                 int nextTimeStamp = nextPacket.timestamp;
@@ -1042,9 +1121,12 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                                     }
                                 }
 
+                                if (terminal.get() || (asyncStopped(workerEpoch) && !inBundle)) break REPLAY_LOOP;
+                                if (startFromBeginning) break; // A backward seek may have arrived while sleeping.
                                 // Process packet
                                 if (nextPacket.type == PacketType.Bundle) inBundle = !inBundle;
-                                channel.pipeline().fireChannelRead(Unpooled.wrappedBuffer(nextPacket.bytes));                                nextPacket = null;
+                                dispatchPacket(nextPacket);
+                                nextPacket = null;
 
                                 lastTimeStamp = nextTimeStamp;
 
@@ -1055,6 +1137,7 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                                 // monster that is Forge networking.
                                 //#if MC>=12002
                                 while (!channel.config().isAutoRead()) {
+                                    if (terminal.get()) break REPLAY_LOOP;
                                     Thread.sleep(0, 100_000);
                                 }
                                 //#endif
@@ -1062,33 +1145,44 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                                 // In case we finished jumping
                                 // We need to check that we aren't planing to restart so we don't accidentally run this
                                 // code before we actually restarted
-                                if (isHurrying() && lastTimeStamp > desiredTimeStamp && !startFromBeginning) {
-                                    desiredTimeStamp = -1;
-
-                                    replayHandler.moveCameraToTargetPosition();
-
-                                    // Pause after jumping (this will also reset realTimeStart accordingly)
-                                    setReplaySpeed(0);
+                                long completedIntention = -1;
+                                synchronized (modeLock) {
+                                    if (isHurrying() && lastTimeStamp > desiredTimeStamp && !startFromBeginning) {
+                                        desiredTimeStamp = -1;
+                                        completedIntention = controlEpoch.get();
+                                    }
+                                }
+                                if (completedIntention != -1) {
+                                    long intention = completedIntention;
+                                    dispatchPacketHandler(guardPacketCallback(() -> {
+                                        if (controlEpoch.get() == intention) replayHandler.moveCameraToTargetPosition();
+                                    }));
+                                    // Do not recapture a newer jump's intention after queuing the camera callback.
+                                    pauseAsync(workerEpoch, intention);
                                 }
                             } catch (EOFException eof) {
                                 // Reached end of file
                                 // Pause the replay which will cause it to freeze before getting restarted
-                                setReplaySpeed(0);
+                                if (asyncStopped(workerEpoch)) break REPLAY_LOOP;
+                                pauseAsync(workerEpoch);
                                 // Then wait until the user tells us to continue
-                                while (paused() && hasWorldLoaded && desiredTimeStamp == -1 && !terminate) {
+                                while (paused() && hasWorldLoaded && desiredTimeStamp == -1 && !asyncStopped(workerEpoch)) {
                                     Thread.sleep(10);
                                 }
 
-                                if (terminate) {
+                                if (asyncStopped(workerEpoch)) {
                                     break REPLAY_LOOP;
                                 }
                                 break;
                             } catch (IOException e) {
+                                if (asyncStopped(workerEpoch)) break REPLAY_LOOP;
                                 e.printStackTrace();
                             }
                         }
 
+                        if (asyncStopped(workerEpoch)) break REPLAY_LOOP;
                         // Restart the replay.
+                        restartPending = true;
                         hasWorldLoaded = false;
                         inBundle = false;
                         lastTimeStamp = 0;
@@ -1100,14 +1194,20 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                             replayIn.close();
                             replayIn = null;
                         }
-                        ReplayMod.instance.runSync(replayHandler::restartedReplay);
+                        AtomicBoolean superseded = new AtomicBoolean();
+                        if (!restartReplay(workerEpoch, superseded)) {
+                            startFromBeginning = true;
+                            // A new target superseded only this control intent, not the live worker.
+                            if (superseded.get() && !asyncStopped(workerEpoch)) continue REPLAY_LOOP;
+                            return;
+                        }
+                        restartPending = false;
                     }
                 }
             } catch (Exception e) {
-                e.printStackTrace();
+                if (!asyncStopped(workerEpoch)) e.printStackTrace();
             }
-        }
-    };
+    }
 
     /**
      * Return whether this replay sender is currently rushing. When rushing, all packets are sent without waiting until
@@ -1122,7 +1222,10 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
      * Cancels the hurrying.
      */
     public void stopHurrying() {
-        desiredTimeStamp = -1;
+        synchronized (modeLock) {
+            controlEpoch.incrementAndGet();
+            desiredTimeStamp = -1;
+        }
     }
 
     /**
@@ -1142,12 +1245,17 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
      */
     @Override
     public void jumpToTime(int millis) {
-        Preconditions.checkState(asyncMode, "Can only jump in async mode. Use sendPacketsTill(int) instead.");
-        if(millis < lastTimeStamp && !isHurrying()) {
-            startFromBeginning = true;
+        synchronized (modeLock) {
+            if (terminal.get()) return;
+            Preconditions.checkState(asyncMode, "Can only jump in async mode. Use sendPacketsTill(int) instead.");
+            controlEpoch.incrementAndGet();
+            if (millis < lastTimeStamp) {
+                // Discard old-stream work immediately, including already queued resource requests.
+                resourcePackLease.advanceGeneration();
+                startFromBeginning = true;
+            }
+            desiredTimeStamp = millis;
         }
-
-        desiredTimeStamp = millis;
     }
 
     protected Packet processPacketAsync(Packet p) {
@@ -1185,13 +1293,20 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
      */
     @Override
     public void sendPacketsTill(int timestamp) {
+        if (terminal.get()) return;
         Preconditions.checkState(!asyncMode, "This method cannot be used in async mode. Use jumpToTime(int) instead.");
 
         // Submit our target to the sender thread and track its progress
         AtomicBoolean doneSending = new AtomicBoolean();
+        long generation = resourcePackLease.generation();
+        long intention = controlEpoch.get();
+        long workerEpoch = asyncEpoch;
         syncSender.submit(() -> {
             try {
-                doSendPacketsTill(timestamp);
+                if (!terminal.get() && !asyncMode && asyncEpoch == workerEpoch
+                        && controlEpoch.get() == intention && resourcePackLease.generation() == generation) {
+                    doSendPacketsTill(timestamp);
+                }
             } finally {
                 doneSending.set(true);
             }
@@ -1218,10 +1333,19 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
     private void doSendPacketsTill(int timestamp) {
         try {
             synchronized (this) {
-                if (timestamp == lastTimeStamp) { // Do nothing if we're already there
+                if (terminal.get()) return;
+                // Equal time is only a no-op while any existing stream work is still current.
+                // Quick/connection boundaries retire readers and prefetch alike; reopen through
+                // the normal restart path, never relabel bytes already read in an older generation.
+                long generation = resourcePackLease.generation();
+                if ((replayIn != null && replayInGeneration != generation)
+                        || (nextPacket != null && nextPacket.generation != generation)) {
+                    restartPending = true;
+                }
+                if (timestamp == lastTimeStamp && !restartPending) { // Do nothing if we're already there
                     return;
                 }
-                if (timestamp < lastTimeStamp) { // Restart the replay if we need to go backwards in time
+                if (restartPending || timestamp < lastTimeStamp) { // Restart the replay if we need to go backwards in time
                     hasWorldLoaded = false;
                     inBundle = false;
                     lastTimeStamp = 0;
@@ -1232,14 +1356,20 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                     registry = getPacketTypeRegistry(State.LOGIN);
                     startFromBeginning = false;
                     nextPacket = null;
-                    ReplayMod.instance.runSync(replayHandler::restartedReplay);
+                    restartPending = true;
+                    if (!restartReplay(-1)) {
+                        startFromBeginning = true;
+                        return;
+                    }
+                    restartPending = false;
                 }
 
                 if (replayIn == null) {
+                    replayInGeneration = resourcePackLease.generation();
                     replayIn = replayFile.getPacketData(getPacketTypeRegistry(State.LOGIN));
                 }
 
-                while (true) { // Send packets
+                while (!terminal.get()) { // Send packets
                     try {
                         PacketData pd;
                         if (nextPacket != null) {
@@ -1248,7 +1378,7 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                             nextPacket = null;
                         } else {
                             // Otherwise read one from the input stream
-                            pd = new PacketData(replayIn);
+                            pd = new PacketData(replayIn, replayInGeneration);
                         }
 
                         int nextTimeStamp = pd.timestamp;
@@ -1258,9 +1388,10 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                             break;
                         }
 
+                        if (terminal.get()) return;
                         // Process packet
                         if (pd.type == PacketType.Bundle) inBundle = !inBundle;
-                        channel.pipeline().fireChannelRead(Unpooled.wrappedBuffer(pd.bytes));
+                        dispatchPacket(pd);
 
                         // MC as of 1.20.2 relies on autoRead, so it can update the connection state on the main
                         // thread before the next packet is read. As such, we need to stall if that was just
@@ -1269,6 +1400,7 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                         // monster that is Forge networking.
                         //#if MC>=12002
                         while (!channel.config().isAutoRead()) {
+                            if (terminal.get()) return;
                             Thread.sleep(0, 100_000);
                         }
                         //#endif
@@ -1314,11 +1446,148 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
         ReplayMod.instance.runTasks();
     }
 
+    private long packetGeneration() {
+        Long generation = dispatchGeneration.get();
+        return generation == null ? resourcePackLease.generation() : generation;
+    }
+
+    private void dispatchPacket(PacketData packet) {
+        if (terminal.get() || packet.generation != resourcePackLease.generation()) return;
+        Long previous = dispatchGeneration.get();
+        dispatchGeneration.set(packet.generation);
+        try { channel.pipeline().fireChannelRead(Unpooled.wrappedBuffer(packet.bytes)); }
+        finally {
+            if (previous == null) dispatchGeneration.remove();
+            else dispatchGeneration.set(previous);
+        }
+    }
+
+    private void sendResourcePack(String replayUrl, UUID packId) throws IOException {
+        long generation = packetGeneration();
+        ServerResourcePackLoader loader = mc.getServerResourcePackProvider();
+        long connectionEpoch = ReplayResourcePackReleaseBridge.connectionEpoch(loader);
+        try (var producer = resourcePackLease.producer(generation)) {
+            if (terminal.get()) throw new IOException("Replay sender has ended");
+            String reference = replayUrl.substring("replay://".length());
+            if (packId == null || !reference.matches("[0-9]+")) {
+                throw new IOException("Invalid replay resource-pack id: " + replayUrl);
+            }
+            int id;
+            try { id = Integer.parseInt(reference); }
+            catch (NumberFormatException invalid) { throw new IOException("Invalid replay resource-pack index: " + reference, invalid); }
+            Map<Integer, String> index = replayFile.getResourcePackIndex();
+            if (index == null) throw new IOException("Missing replay resource-pack index");
+            String hash = index.get(id);
+            if (hash == null || !hash.matches("[0-9a-fA-F]{40}")) {
+                throw new IOException("Missing/invalid resource-pack SHA-1 for index " + id);
+            }
+            // Preserve the archive key's exact case; only the lease normalizes local filenames.
+            Path path = resourcePackLease.publish(producer, hash, () -> {
+                var source = replayFile.getResourcePack(hash);
+                if (source == null || !source.isPresent() || source.get() == null) {
+                    throw new IOException("Missing replay resource-pack source: " + hash);
+                }
+                return source.get();
+            });
+            ReplayResourcePackReleaseBridge.registerReadyPath(resourcePackLease, path);
+            var queued = resourcePackLease.admission(generation);
+            try {
+                dispatchPacketHandler(() -> {
+                    try (queued) {
+                        if (!queued.valid() || !callbackCurrent(generation, loader, connectionEpoch)) return;
+                        ReplayResourcePackReleaseBridge.submitReady(resourcePackLease, generation, connectionEpoch,
+                                loader, packId, path);
+                    } catch (IOException failure) {
+                        if (!terminal.get()) failure.printStackTrace();
+                    }
+                });
+            } catch (RuntimeException | Error failure) {
+                try { queued.close(); }
+                catch (RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+                throw failure;
+            }
+        }
+    }
+
+    /** Checked only on actual client execution, never on the constructor-started worker. */
+    private boolean callbackCurrent(long generation, ServerResourcePackLoader loader, long connectionEpoch) {
+        return resourcePackLease.generation() == generation && sessionCurrent(loader, connectionEpoch);
+    }
+
+    private boolean sessionCurrent(ServerResourcePackLoader loader, long connectionEpoch) {
+        return mc.isOnThread() && !terminal.get() && replayHandler.ownsFullReplaySender(this)
+                && mc.getServerResourcePackProvider() == loader
+                && ReplayResourcePackReleaseBridge.connectionEpoch(loader) == connectionEpoch;
+    }
+
+    private Runnable guardPacketCallback(Runnable runnable) {
+        long generation = packetGeneration();
+        ServerResourcePackLoader loader = mc.getServerResourcePackProvider();
+        long connectionEpoch = ReplayResourcePackReleaseBridge.connectionEpoch(loader);
+        return () -> {
+            if (callbackCurrent(generation, loader, connectionEpoch)) runnable.run();
+        };
+    }
+
+    private Runnable guardControlCallback(Runnable runnable) {
+        long intention = controlEpoch.get();
+        return guardPacketCallback(() -> {
+            if (controlEpoch.get() == intention) runnable.run();
+        });
+    }
+
+    private void scheduleControlHandler(Runnable runnable) {
+        dispatchPacketHandler(guardControlCallback(runnable));
+    }
+
+    private void pauseAsync(long workerEpoch) throws Exception {
+        pauseAsync(workerEpoch, controlEpoch.get());
+    }
+
+    private void pauseAsync(long workerEpoch, long intention) throws Exception {
+        ReplayMod.instance.runSync(guardPacketCallback(() -> {
+            if (controlEpoch.get() == intention && !asyncStopped(workerEpoch)) setReplaySpeed(0);
+        }));
+    }
+
+    /** Restart is a packet/connection boundary, never the end of the task. */
+    private boolean restartReplay(long workerEpoch) throws Exception {
+        return restartReplay(workerEpoch, null);
+    }
+
+    private boolean restartReplay(long workerEpoch, AtomicBoolean superseded) throws Exception {
+        if (terminal.get()) return false;
+        advancePacketGeneration();
+        long generation = resourcePackLease.generation();
+        long intention = controlEpoch.get();
+        ServerResourcePackLoader loader = mc.getServerResourcePackProvider();
+        long connectionEpoch = ReplayResourcePackReleaseBridge.connectionEpoch(loader);
+        AtomicBoolean restarted = new AtomicBoolean();
+        ReplayMod.instance.runSync(() -> {
+            if (controlEpoch.get() == intention && callbackCurrent(generation, loader, connectionEpoch)
+                    && (workerEpoch < 0 || !asyncStopped(workerEpoch))) {
+                replayHandler.restartedReplay();
+                restarted.set(true);
+            } else if (superseded != null && controlEpoch.get() != intention
+                    && sessionCurrent(loader, connectionEpoch)
+                    && (workerEpoch < 0 || !asyncStopped(workerEpoch))) {
+                // Retry with a fresh control request only while this same session/worker still owns it.
+                // No PacketData or resource admission receives a replacement generation.
+                superseded.set(true);
+            }
+        });
+        return restarted.get();
+    }
+
     /**
      * Runs the given runnable on the main thread as if it was a packet handler.
      * Note that the packet handler queue has different behavior than the standard ReplayMod queue.
      */
     private void schedulePacketHandler(Runnable runnable) {
+        dispatchPacketHandler(guardPacketCallback(runnable));
+    }
+
+    private void dispatchPacketHandler(Runnable runnable) {
         if (mc.isOnThread()) {
             runnable.run();
         } else {
@@ -1481,7 +1750,10 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
         private final byte[] bytes;
         private final PacketType type;
 
-        PacketData(ReplayInputStream in) throws IOException {
+        private final long generation;
+
+        PacketData(ReplayInputStream in, long generation) throws IOException {
+            this.generation = generation;
             if (ReplayMod.isMinimalMode()) {
                 // Minimal mode, we can only read our exact protocol version and cannot use ReplayStudio
                 timestamp = readInt(in);

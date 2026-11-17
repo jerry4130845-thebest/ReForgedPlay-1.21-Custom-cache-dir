@@ -1,6 +1,6 @@
 # ReForgedPlay 自定义目录与 RAMDisk 支持计划
 
-> 状态（第三批重规划，Lead 已复核）：用户确认前两批已提交；本轮只读核实 HEAD=2903157，规划前工作区 clean。第三批**仅授权规划，未授权源码实施、测试或构建**，新第 13 节是待确认候选，不是实施白名单。此前被停止、无 closing report 的第三批委派不视为完成。本轮只更新本顶部与第 13 节，保留第 1–12 节为历史；第 12 节“等待提交”等文字不再代表当前提交状态。第二批真实 MC/native PNG 与游戏验收缺口依然保留。第三批完整目标因资源包真实释放确认尚未闭合而 BLOCKED，不能把 clear()/网络 close()/加载 future 当作 ZIP 已释放。未写源码、未构建、未编译测试、未 Git 写或启动游戏。
+> 状态（第三批P：实现及授权验证层通过，进入用户自行提交源码检查点；实际游戏未验收）：D-final独立22/33/完整20/新33＋18个Quick/连接例、真实C/R、完整build23s及新最终JAR真实Sponge4/4全部通过。Lead已复核八实现文件实际范围/关键diff、亲核当前源码与JAR指纹、完整八文件patch及白名单；13.27为最终收据。只更新计划收尾，不再改生产源码，不代执行Git写/安装/游戏、不进入下一批。NeoForge实际launch/全模组/世界UI/render/game及OS权限不足项仍未签；历史13.22证据覆盖/13.23权限字段偏差完整保留，未借最终PASS洗掉。最后结束活跃目标，停等用户审查并自行commit。
 > 用户目标：独立配置 cache、raw、temp、tmp、record 等目录，支持绝对路径及相对于游戏目录的路径；将可丢弃缓存和临时文件放在 RAMDisk，用完清理，减少实体硬盘写入。没有已报告故障，本次属于预防性兼容与容错设计。
 
 ## 1. 项目基线与证据边界
@@ -601,3 +601,352 @@ A closing report：本计划已落盘，本轮仅规划；已准确区分 void /
 - 本轮交付仅计划；git status/diff 核实业务源码、IDE配置、依赖、测试均未改动。文档检查运行 git diff --check；没有新 Java 代码，因此不复用第二批 build 当第三批验证，也不声称运行过第三批测试。
 - 建议下一步继续定点只读取证，先给出可证明的释放接入点和准确文件范围；若用户更重视立即交付，可明确选缩批 S（甚至仅双流 TWR），但必须承认它不实现 tempPath 和安全即时清理。当前不默认选缩批，不将候选源码列成已授权。
 - 本轮 A 规划目标完成，业务实现未完成。停在方案选择/文件范围确认之前，不启动 B/C/D，不执行 Git 写操作。
+
+### 13.9 用户授权的深入取证与证据等级（不是第三批实现）
+
+本轮用户明确选择“继续查完整方案”，允许联网和充分取证。基线只读核实 HEAD=d491135，研究开始及四名审查者结束时工作区 clean。Lead 已加载 minecraft-java-build/minecraft-neoforge-mod，三名独立研究者分别核查 ZIP 关闭链、Loader/MC 重载因果时序、NeoForge 公开接口，再由第四名独立审查者反例审查。研究者均未改文件、创建临时Java、构建、安装依赖或启动游戏。**本轮实际交付仅本计划；正式源码仍在工作区 src，工具临时目录中的内容是字节码/命令证据，不是模组实现。**
+
+所有下列偏移均是本项目 actual named MC1.21.1/NeoForge21.1.82 JAR 的字节码偏移，不是源码行号；工具固定 Oracle Java21.0.12.1。NeoForge 事件依据本机21.1.82 sources JAR和合并JAR；网上某些标为1.21.x的JavaDoc实际是21.0.30-beta，未拿它冒充本版证据。
+
+| 已独立复核的新事实 | 对设计的直接约束 |
+| --- | --- |
+| ZipResourcePack$ZipFileWrapper.close()V @11 closeQuietly(zip)、@14–16 zip=null，不置closed；open() @16–28可new ZipFile，两方法均未同步 | close RETURN不是永久关闭证明，且并发open可能丢失一个rawZip引用；owned路径必须完整串行化open/close或使用显式许可计数，不能只挂TAIL |
+| ZipBackedFactory.open与openWithOverlays各建fresh wrapper；base/overlays共享本次wrapper；metadata扫描和active使用不同wrapper | 按实际rawZip identity记账，不能按pack close次数计数；旧profile还可fresh创建wrapper |
+| InputSupplier.create(ZipFile,ZipEntry)捕获rawZip；迟到supplier只调该raw.getInputStream；迟到Resource/pack.open则可能再次走wrapper.open | 成功关闭raw可封住既得supplier；仍需独立封禁现有及未来wrapper重开 |
+| JDK21 ZipFile.close同步清理其getInputStream所得流并Source.release；Source可能被同路径多个ZipFile共享 | 不再要求join所有reader线程/计算任务；必须关闭全部实际rawZip，不只是一个pack |
+| JDK21 close先置closeRequested；cleanup IOException后第二次close可直接return | 从ACTIVE期每个raw的第一次close就记录sticky失败；retire重试空返回不能洗成成功 |
+| Loader.reload(C1)先换当前context/provider，MC因R0 SplashOverlay仅排队；R0成功却调用Loader当前C1.onSuccess | context.onSuccess、Loader.onReloadSuccess或随手取得的future都不能确认C1真正卸载；已找到明确反例，不是笼统担心异步 |
+| MC私有reloadResources在@52取得最终packs、@92调用resourceManager.reload；$20先@23 F.complete，再@29 onFinishedLoading、@32 RETURN | 必须关联真正开始的cycle与实际packs；只挂F.thenRun甚至可能在成功回调末尾之前运行，不足以完成释放事务 |
+| ResourcePackManager.addPackFinder(ResourcePackProvider)是本版public synchronized；required/hidden profile及PackFactory均公开 | 无Mixin替代路线真实存在，不再笼统声称只能用Mixin；但注册接口不等于替代server loader语义已经完成 |
+| RegisterClientReloadListenersEvent才是本版事件；只在构造期注册listener，listener每轮运行；未找到本版ClientResourceLoadFinishedEvent | 不引用别版本不存在的事件；单listener不是全轮成功或ZIP关闭通知 |
+
+主要可复查证据：[Loader/Manager及context字节码](<R:/Temp/dsh-subprocess-e8qBMh/dsh-subprocess-21728-3-124fa39947ee-stdout.log>)、[MC actual-cycle和回调](<R:/Temp/dsh-subprocess-e8qBMh/dsh-subprocess-21728-5-204185c05b87-stdout.log>)、[Resource/Profile/factory/InputSupplier](<R:/Temp/dsh-subprocess-e8qBMh/dsh-subprocess-21728-4-bd81234c4891-stdout.log>)、[JDK21 close/Source/streams](<R:/Temp/dsh-subprocess-e8qBMh/dsh-subprocess-21728-6-cbc23db2f48e-stdout.log>)、[wrapper精确open/close](<R:/Temp/dsh-subprocess-e8qBMh/dsh-subprocess-21728-7-5cdb2c9e5992-stdout.log#L1244-L1317>)。Lead 已独立复核 wrapper、MC $20及public addPackFinder；并fetch [Java21官方ZipFile.close契约](<https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/zip/ZipFile.html#close()>)。这些自动spill不是持久源码；后续实施前须用本节固定JAR/类/descriptor重新核查，不能靠临时日志一直存在。
+
+### 13.10 路线比较与首选P
+
+| 路线 | 静态可行性与代价 | 本轮选择 |
+| --- | --- | --- |
+| P：保留server loader，窄观察ownership/context、actual cycle，接管本lease的ZIP open/close | 保留vanilla send/pop/排序/状态/overlay/metadata；不修写其通用重载行为。需要三类Mixin职责及窄桥接 | **首选实施候选**，独立反例审查同意；不是已编译/已注入/已游戏验证 |
+| D：public addPackFinder＋长期dynamic provider＋自有PackFactory/托管archive | API确实存在；可只枚举自有required/hidden profiles，不写options。但需重新接管replay UUID/pop/顺序/status、失败恢复和overlay/metadata/NeoForge扩展语义 | 保留替代，不为少几个文件扩大语义变更；不称不可能 |
+| F：仅替换Loader.toProfiles唯一NEW ZipBackedFactory为managed factory | 工厂公开非final，但wrapper.open package-private、zip私有；只包delegate.close仍吞错/可重开。若不用wrapper hook，需新访问机制或自写pack/ZIP实现 | 不是“一个NEW hook免费闭合”；不选作生命周期方案。P可用纯跟踪factory适配器标记实例身份，但不替代ZIP门 |
+
+首选P的范围是本模组私有任务路径、已识别的本版MC ZIP链和协调的Replay调用；不承诺拦截任意第三方代码直接new ZipFile/绕过MC开本路径，也不防恶意父目录替换。保持可信父目录与NOFOLLOW/真实边界检查，不宣传操作系统沙箱。
+
+### 13.11 P的完整释放事务与必要修订
+
+以下是**拟实现契约，不是已经存在的API或运行结果**。资源包lease仍建议作为ReplayFoldersService内窄静态嵌套纯JDK类型，MC耦合留桥接；不借用图片image.png句柄，不修改前两批，不扩展为通用存储框架。
+
+1. **路径/发布门：** 每sender一次tempPath快照；独占task、多ZIP、严格hash、双流TWR、同目录complete-only发布沿用13.4。任何copy/flush/close/move失败均不入READY、不排队加载，只有登记的完整ZIP对MC可见。任务源流由其TWR关闭，ReplayFile整体所有权仍在handler。
+2. **停止门：** 新增不可逆terminal，区别async terminate和seek代次。terminal之后拒绝新的packet/复制/actual add；排队runnable真执行时再查owner/session/packet generation，finally释放许可。已进入的resource-pack copy按终止/失败收尾，不得在结束后发布或加载；记录真实生产者与actual-add在途，不拿executor.shutdown当退出确认。旧runSync restart/setup回调也须检查terminal，不能回头重建已结束回放。
+3. **UUID归属门：** 在Loader实际add(Path与URL)/remove/removeAll/clear/init执行点观察，票据至少(loader实例、session/connectionEpoch、UUID、addSequence、leasePath)。非replay add也会替换ownership；旧release只CAS移除自己仍持有的票据，被新owner替换时不remove新owner，但旧路径的释放债务仍须结清。不得主动调用全局clear/removeAll、关闭singleton loader或改用户enabled列表。
+4. **provider证据：** 冻结每次真实安装provider的不可变快照及revision，覆盖正常reload、metadata重试回退、onReloadFailure与forced failure。不在失败后重读已变ctx冒充原快照。provider必须排除lease所有路径及其有效旧代次。
+5. **actual cycle证据：** 采集createResourcePacks最终返回的实际pack对象列表，而非仅profiles；现有Mixin_InjectDynamicResourcePacks会追加Lang/jGui，不能忽略。区分每轮本地F、cycleId、实际安装序号；resourceManager.reload确实执行并正常返回才标安装。只有该轮$20正常RETURN才标SUCCESS，异常/取消/失败/关联不明保留。仅历史排除成功不够，必须是当前安装manager，或此后所有安装manager也已证明排除。
+6. **身份关联不能猜：** 拟在Loader的ZipBackedFactory构造点对owned路径使用桥接内薄跟踪子类，openWithOverlays调用super、记录返回的最终ResourcePack identity→lease/path；metadata仍走vanilla，archive生命周期由wrapper hook负责。不是自写pack，也不能用server/%08X/%s字符串解析代替身份。需在B证明该适配器覆盖实际owned pack列表、失败及overlay；若需额外Profile Mixin/源码，必须停下重新申请，不暗增第9个实现文件。
+7. **ZIP门：** 所有owned wrapper的open/close与SEAL由同一lease协调。推荐短状态锁＋显式open/close许可：任何raw在返回MC前已登记，new/close若在锁外必须有opens/closesInFlight与OPEN/CLOSING/SUCCESS/FAILED，不能HEAD检查后锁外new而不计数。按wrapper与raw identity登记，ACTIVE普通close不封存，允许合法后续重载。非owned路径完整保留vanilla。
+8. **首关收据：** owned close不得依赖closeQuietly；从ACTIVE期第一次raw.close起保存原始结果。失败sticky，后续空close返回不解除失败，不以GC/Cleaner/finalize或再次delete成功代证。JDK成功raw.close已关闭关联streams；不增加不必要的每InputStream引用计数，不等所有reader线程join。既得supplier持closed raw不能重开；迟到pack或fresh factory通过路径门被拒绝。
+9. **终局事务：** terminal且producer/add许可归零→guarded ownUUID remove→provider确实排除→当前实际成功cycle排除且无有效晚到安装者→主线程验证后不可逆SEAL→异步协调关闭所有登记raw（包括metadata及未安装旧pack）→首次close全SUCCESS、无sticky poison、无在途open/close→只删登记普通ZIP/staging及空task。不存在MC等待时持lease锁，也不主线程join/await；关联不明、失败/挂起都WAIT/诊断，不设固定延时后强删。
+10. **晚到任务的范围：** Lead另查getReloadScheduler的BootstrapMethods#2，实际为直接REF_invokeVirtual Loader.reload，不是把ctx另存到未知线程的闭包；排队的是Loader$5驱动的manager.update。仍必须记录所有实际provider替换/manager安装及失败恢复，并以terminal票据阻止晚add。若转化后的运行类改变此关系，B/D须拒绝旧证明而不是默认可删。已退休路径不接受新提交，绝对task路径本进程不复用。
+11. **seek/新回放：** seek只推进packet/connection epoch并重建连接，保留sender task，不SEAL。最终退出后的清理延续仅持自己的lease，不再调用旧handler的setup/disconnect/forcefullyStopReplay，避免迟到清理影响新回放。同UUID新owner以票据保护，不能靠UUID Set猜归属。
+12. **退出API保持同步：** Lead核查ReplayModReplay.startReplay在endReplay后立即构造新handler，GuiRenderQueue也在endReplay后立即处理下一项。因此不把整个endReplay偷偷改成异步返回；原有退出/全局handler清除语义保留，只有资源ZIP最终回收可延续。正常save/close仍归handler，不能在sender关闭ReplayFile。handler关闭导致在途只读资源包copy失败时按已终止路径处理、TWR释放、永不发布；必须用合成ReplayStudio样本验证这一交错。如果必须改变ReplayFile关闭或调用方同步契约，当前8文件方案须停下重新申请，不能默改GUI/渲染队列/保存事务。
+13. **内存与tombstone：** 成功raw/强wrapper引用和完成cycle/context及时裁剪，UUID仅当前owner。每个退休task保留一条规范目录＋唯一token＋SEALED的进程期精简tombstone，阻止旧profile创建fresh wrapper后重开；不用TTL/LRU擅自回收。空间是O(活跃状态＋本进程退休task数)，不是严格常量有界。若要求严格有界，需另证明所有factory未来来源/生命周期，weak wrapper表不够。
+14. **失败时保留：** close首次失败、provider/cycle不匹配、无权限或边界置换等只留本任务诊断/文件，不扩大递归删除；清理不重试删除后来替换的文件。原异常与suppressed保留，不拿此次“设计门已给出”掩盖未实施/未验收。
+
+### 13.12 精确接入点与同类内hook责任（候选，未创建）
+
+| 类 / descriptor / 已核实位置 | 拟观察或接管的内容 |
+| --- | --- |
+| ServerResourcePackLoader.addResourcePack(UUID,Path)V及(UUID,URL,String)V；remove(UUID)V、removeAll()V、clear()V、init(ClientConnection,AcceptanceStatus)V | 实际执行点归属票据与connection代次；只阻止/操作已退役owned路径或桥接自身的过期请求，不拦合法foreign remove |
+| Loader.toProfiles(List)List @112–120 NEW ZipBackedFactory(Path)；reload(ReloadContext)V @68 provider写入、@75 reloadResources；failure/forced分支也写provider | owned工厂实例跟踪、provider/path不可变revision及回退记录。不得把@75返回F当release；不重写vanilla通用context回调逻辑 |
+| MC.reloadResources(Z,LoadingContext)CompletableFuture @52最终packs、@92 resourceManager.reload、@99捕获本轮F的callback | final pack snapshot＋真实cycle/frame；已有future/SplashOverlay早return不创造新轮。local捕获和调用异常路径必须POC验证 |
+| MC.lambda$reloadResourcePacks$21(Z,LoadingContext,CompletableFuture,Optional)V；$20(CompletableFuture,LoadingContext)V @32正常RETURN | 失败单独记，不等原future异常完成；成功晚于worldRenderer.reload/logger/loader回调/F.complete/onFinishedLoading，不能只用F.thenRun |
+| ZipResourcePack$ZipFileWrapper.<init>(File)V、open()ZipFile、close()V | 私有task binding及owned完整open/close协调；不是只close TAIL。可用现有Sponge Inject/Redirect等，不假定有MixinExtras或增加依赖；普通路径不改 |
+
+私有/合成方法、NEW重定向、局部变量frame、映射和多Mixin顺序均是**实现前POC门槛**，不是已命中的注入。所有注入须限定descriptor与命中数量；不使用无声require=0绕过。现有Mixin资源的compatibilityLevel/minVersion不顺手改；若所选实现确需改变，先停问用户。
+
+### 13.13 待用户批准的P实施白名单：8个实现文件＋本计划
+
+| 文件 | 类型与限定职责 |
+| --- | --- |
+| [ReplayFoldersService.java](<src/main/java/com/replaymod/core/files/ReplayFoldersService.java>) | 现有：资源包tempPath入口、窄嵌套lease、归属及纯JDK文件门；图片既有行为不改 |
+| [FullReplaySender.java](<src/main/java/com/replaymod/replay/FullReplaySender.java>) | 现有：多ZIP/TWR/完整发布、永久terminal、生产者与排队add/restart的代次检查 |
+| [ReplayHandler.java](<src/main/java/com/replaymod/replay/ReplayHandler.java>) | 现有：构造/seek/最终退出接线，保持同步退出API；不重写回放保存事务 |
+| `src/main/java/com/replaymod/core/files/ReplayResourcePackReleaseBridge.java` | 新候选：MC ownership/provider/cycle桥接、薄工厂身份跟踪；接口内嵌，不额外铺顶层策略类 |
+| `src/main/java/com/replaymod/core/mixin/Mixin_ServerResourcePackLoaderLease.java` | 新候选：Loader归属与provider/context观察，含工厂跟踪接入 |
+| `src/main/java/com/replaymod/core/mixin/Mixin_MinecraftResourceReloadLease.java` | 新候选：实际轮、最终packs及准确成功/失败身份 |
+| `src/main/java/com/replaymod/core/mixin/Mixin_ReplayZipFileLease.java` | 新候选：仅owned wrapper open/close/封存，记录首关结果 |
+| [mixins.core.replaymod.json](<src/main/resources/mixins.core.replaymod.json>) | 现有资源登记：仅client列表追加三项；这是本次需特别批准的资源文件，不是授权改用户配置 |
+| [plan.md](<plan.md>) | 文档：方案/阶段状态/真实验证记录；加本计划一共9个文件 |
+
+以上不是当前已授权写入清单。新增源码未创建，现有源码、Mixin资源均未改；本轮唯一写入本计划。仅新文件少不代表方案更小，故不为了维持两/三源码数字而隐藏MC实际接入。若用户批准8文件，B中发现需第9个实现文件/修改其他配置，仍须停问，不无限扩权。
+
+### 13.14 实施前后的验证门槛与本轮停点
+
+| 验证层 | 必须证明，不能替代成什么 |
+| --- | --- |
+| B：实际目标与POC | 复核本版JAR descriptors、NEW/field/local与synthetic remap；工厂identity覆盖final packs及已有collector Mixin；注入匹配数、异常路径及转化后类。只有编译成功不能称注入生效。任何扩大源码/配置需求先再申请 |
+| C：纯JDK与真实生产逻辑 | 代码只在工作区白名单src实现；仓库外harness可用边界stub，但编译/调用真实lease逻辑、不复制逻辑代测。temp文件中的测试源码不能算模组交付 |
+| D：文件/关闭反例 | 多raw同路径、metadata/overlay/fresh factory、并发open覆盖风险、ACTIVE首close IOException＋后续空close、SEAL竞态、迟到supplier、tombstone新wrapper、根/哨兵/link边界、半写/close/move失败；首次关闭失败必须RETAIN，不把重试当PASS |
+| D：因果/会话反例 | 旧R0错认C1、future已complete但$20仍未RETURN/随后异常、历史成功但当前manager含路径、fallback/forced/hang、metadata重取、queued stale add、同UUID新owner、seek不终结、结束后立即新回放/渲染队列。用合成真实ReplayStudio样本覆盖close中止资源包copy，确保无半ZIP加载或改坏回放 |
+| D：专用构建 | mc_gradle task=build，args=["-Djava.io.tmpdir=C:\\Temp","--console=plain"]，现有wrapper/Java21，不clean/refresh/装包/跳测试；真实输出落盘，NO-SOURCE不当JUnit通过 |
+| 真实NeoForge加载/游戏 | 须用户另行允许启动或由用户执行：转化后Mixin命中、两ZIP/overlay、加载中退出、手动/forced失败恢复、seek/quick、无world、新session同UUID、其他包不变、UI/渲染队列同步契约。静态证据/模型/stub/build均不冒充本层验收 |
+
+当前形成的是**可实施的完整设计候选与准确接入范围**，不是业务功能、注入验证或游戏验收完成。三路证据与反例审查已收集，Lead另核实JDK官方契约、实际public provider接口、wrapper完整open/close、MC $20末尾以及退出调用者；不再仅以“找不到release事件”作结论。P仍有B的映射/身份覆盖及D的真实行为门槛，不能预报通过。
+
+本轮后续操作是展示仅本计划的真实diff并运行git diff --check，然后向用户申请上述8个实现文件＋计划的范围；**不自动启动B/C/D，不修改实际配置、依赖、.env、仓库测试或其他源码，不Git写、不装包、不启动游戏。** 用户若批准后再走B→C→D，小批检查点必须分别称为规划、实现、验证，不能把本轮取证叫“第三批功能已完成”。
+
+### 13.15 方案P实施授权与阶段约束
+
+- 用户已明确批准13.13的8个实现文件＋本计划。授权不等于代码已写：Lead核实HEAD=d491135，开始时仅本计划modified，新增候选源码均未创建。A已完成，接下来严格B→C→D，不并行写同一项目的阶段。
+- Lead维护计划，B/C/D只读计划并回报结果。完整白名单就是13.13，既有图片Image、Setting、ReplayMod、第一批helper/caller、GUI/渲染队列、构建/依赖/wrapper/.vscode/实际配置/仓库测试均不修改；Mixin资源只加三项client登记，不顺手改compatibilityLevel或minVersion。
+- **B职责：** 先用实际Java21与named JAR复核descriptor/NEW/local frame/回调身份，建立窄自有lease/bridge契约、薄factory身份跟踪及三个Mixin的精确框架。批准源码只能写工作区src，不写Temp充当模组实现。未实现必须明确拒绝/保留，不能用空future或默认成功骗过释放门；实际播放不提前接入占位资源分配，也不在生命周期尚不完整时激活owned路径删除。
+- B可以在独占仓库外目录做无游戏POC/检查并使用现有缓存依赖，不安装或添加包。实际Mixin转化若未运行，只报告descriptor/ASM结构或编译证据，不能伪称注入命中；不能用复制的production逻辑当验证。发现必须增加第9个实现文件、访问变换、依赖或配置变化立即停报，不自行改选dynamic provider。构建若需要，一律mc_gradle及指定C:/Temp参数。
+- **C职责：** 消费B交接，按13.11完整实现路径快照、双流TWR/完整发布、terminal/epoch许可、UUID票据、provider/actual-cycle关联、首close sticky、SEAL/tombstone和受控回收，并最小接入同步endReplay。一次C过宽可顺序拆片，仍不与B/D并行。删除必须真正满足门，不能降级成“先保留文件即功能完成”，也不能偷偷省掉三个职责。
+- **D职责：** 在C完成后运行13.14实际生产代码/缓存ReplayStudio合成样本的外部验证、注入与回归证据，以及专用mc_gradle build -Djava.io.tmpdir=C:\Temp --console=plain。仓库测试不改，无NO-SOURCE冒充通过；真实游戏未授权启动则明确未测。D默认只读审查，需修复回报Lead/C在原白名单内修订再验。
+- 任何阶段失败如实记录，不跳过下一验证阶段，不宣称部分实现“完成”。遇注入POC/范围/同步退出契约问题，保留当前差异并停报。最终只在实际通过的源码/隔离/构建检查点停等用户自行commit，不继续其他目录批次，不Git写、不装包、不访问whale-craft或启动游戏。
+
+### 13.16 B真实交付、Lead复核与C分片
+
+- B修改严格八个实现文件：Folders新增42行lease拒绝stub，Sender/Handler仅4/3行接线TODO；四个新Java文件包含桥接和三个精确Mixin，资源JSON仅追加三client项。既有播放尚未切入新lease，owned admission/release/ZIP均明确拒绝；观察器仍空，不得安装为第三批完成版。
+- Lead已回读四个新文件、Folders新增内容、[B完整交接](<C:/Temp/reforgedplay-B3-20261113-2052-7f4e/REPORT.md>)、[named原始转化](<C:/Temp/reforgedplay-B3-20261113-2052-7f4e/transform.log>)、[Mojang转化](<C:/Temp/reforgedplay-B3-20261113-2052-7f4e/transform-mojang.log>)、[身份POC](<C:/Temp/reforgedplay-B3-20261113-2052-7f4e/identity.log>)及[状态收据](<C:/Temp/reforgedplay-B3-20261113-2052-7f4e/final-status.log>)。
+- Oracle21.0.12.1，缓存Sponge0.8.7/ASM9.6 standalone自有字节码host：named Loader/MC/wrapper/manager 4/4，TinyRemapper离线重映射后Mojang对应4/4，含未改collector。注入require/expect/allow保留，F/list槽3/4及成功通知在F.complete/onFinishedLoading之后，ASM BasicVerifier23个方法。真实metadata创建、base及两overlay最终对象身份通过；foreign transformed wrapper独立JVM回归通过。**这些不是NeoForge launch service、所有安装模组、metadata解码、owned生命周期或游戏验收。**
+- 外部javac --release21 -proc:none编译实际工作区源exit0，未运行注解处理器；项目compileJava/build尚未执行，D必须补专用构建。初次Unit/Void类型不符已按实际签名修正，旧失败日志保留。身份POC仅在外部反射绕过拒绝注册用作验证，没有生产测试hook。Lead git diff --check通过；git stat不含四个untracked新文件，不能把stat总数冒称全部源码行数。
+- **C1先行：** 主写ReplayFoldersService与ReplayResourcePackReleaseBridge，完成文件/lease、所有observer、票据/provider/current-cycle、OwnedZip首close sticky/SEAL/tombstone及可供C2使用的窄接线API。必要时可在三份已获批Mixin内精确补观察信息，但必须说明并重跑相关离线POC；不碰Sender/Handler接线或资源JSON旧项，不留空观察器冒充证据。计划只读。
+- **C2后续：** 消费C1实际契约后，最小接入FullReplaySender/ReplayHandler并移除本批TODO；严格同步退出API，禁止旧异步restart和新session互相影响。若需小幅修正lease/bridge/Mixin仍限原八文件并重验，不默认允许新文件或其他调用方修改。C1→C2顺序完成后才进入D，不并行写。
+- 生命周期空场景也要有证明：从未提交MC/未创建factory/raw的任务可依据明确的未暴露证明收尾；不得伪造SUCCESS cycle。若已提交但从未active、manager不产生reload，需要实际未打开/已移除/无晚add证明，否则保留诊断。失败不等于已完成。
+
+B原话：这次我能签的是“现有八文件内，真实字节码能接上并保持最终对象身份”；真正的释放许可和最后一次删除，还没有让占位代码代签。
+
+### 13.17 C1候选未过验证门，恢复后重委派收尾
+
+- [C1交接报告](<C:/Temp/reforgedplay-C1-20261114-a91f/REPORT.md>)明确标记未闭合：仅Folders、Bridge与Loader Mixin补NOOP身份的三份获批源码变化，Sender/Handler仍未接线。中间版本外部编译、named/Mojang转化通过，最终保守修订尚未重编译；模型仅完成8组，随后因外部classpath缺缓存Brigadier中断，后半未跑。Gradle help的1秒超时不算编译/构建；不得伪造项目构建通过。
+- Lead回读报告、最终候选关键源码、两个复跑脚本和完整外部harness，确认并非可启用的C1检查点。当前bridge将actual-add不确定性永久标到整个loader，可能拖住不相关后续lease；重委派必须缩小到具体票据/UUID/受影响lease并加回归，不能靠清空全部疑点或省略provider/cycle门“修好”。受影响失败lease仍允许保守保留和诊断。
+- 用户已明确回复“继续”，目标工具返回active/armed；一次重复resume被工具明确返回already active/armed，不是Java/源码错误，不重试该操作。
+- 当前主代理可用pwsh；只读确认现有Git Bash在C:/Program Files/Git/bin/bash.exe（及usr/bin）和指定Java21均存在，不安装执行器。可在pwsh以绝对路径调用现有bash脚本；如子代理工具缺失，先给出冻结源码/外部脚本，再由Lead执行，不用Gradle任务注入绕过。
+- C1重试使用新独占外部目录保存最终源码指纹、完整编译/转化及全部矩阵日志，保留旧C1/B证据。先C1修复与验证，再审查是否进入C2，禁止直接把未验证候选接进播放。项目compileJava可按专用工具先验证，D的最终build仍必做；任何新增文件/依赖/配置需要先停问。
+
+首轮C1原话：我愿意把“已经写出”和“已经证实”分开交接；卡住的那盏绿灯，不该由删掉文件或补一句承诺来代替。
+
+### 13.18 Lead独立真实ReplayStudio源流关闭探针
+
+- C1重试执行期间，Lead只读取后续接线相关旧Sender/Handler和库API，不改它们。用指定Java21 javap核实本地ReplayStudio的ReplayFile/ZipReplayFile/ReplayStudio实际签名，再在独占C:/Temp目录创建小型合成回放，写65718字节资源包和index后保存、关闭并重新打开；不是用户回放，不改库依赖。
+- [源代码](<C:/Temp/reforgedplay-P-SourceClose-8d7b42c1/ReplayStudioSourceProbe.java>)与[复跑脚本](<C:/Temp/reforgedplay-P-SourceClose-8d7b42c1/verify-source.sh>)使用真实本地ReplayStudio JAR与缓存classpath，Java --source21执行，不编译/替换模组源码，不启动MC。pwsh调用已有Git Bash，后台job完整收取exit0。
+- [原始输出](<C:/Temp/reforgedplay-P-SourceClose-8d7b42c1/source-close.log>)：getResourcePack返回java.io.BufferedInputStream；先读1字节，再关闭ReplayFile，继续读取得到IOException: Stream closed。合成回放保留在该日志所列唯一fixture目录。
+- 这只确认该依赖/样本的源流关闭行为，**没有验证lease发布、handler退出、worker交错或MC释放**。C2/D仍须控制真实复制中的stop→ReplayFile.close交错，证明TWR/producer许可释放、READY为空及无半ZIP加载；不能拿此探针替代生产接线或完整构建。若其他合法源在关闭后仍可读完，终止代次也必须阻止READY发布，不能只依赖源流一定抛错。
+
+### 13.19 C1R收据及Lead实际项目编译门通过，顺序进入C2
+
+- 同一C1R代理先到failed通知、后又收到完整closing；不从通知推断成功/失败。Lead实际回读[最终报告](<C:/Temp/reforgedplay-C1R-20261114-1346-b7d2/REPORT.md>)、[最终22组模型日志](<C:/Temp/reforgedplay-C1R-20261114-1346-b7d2/model-v13-final.log>)、[48增13删的修复diff](<C:/Temp/reforgedplay-C1R-20261114-1346-b7d2/retry-bridge.diff>)与[结构日志](<C:/Temp/reforgedplay-C1R-20261114-1346-b7d2/structure.log>)后才接纳交接。
+- C1R仅修改Bridge，去掉loader永久全局uncertain，改为具体UUID/epoch/attempt/受影响lease的债务；保留旧失败、正常新任务独立通过，同时处理失败outer/成功inner与失败nested的重入。Folders/三Mixin据报告与接收版本字节一致。没有接Sender/Handler或改其他范围。Lead Get-FileHash核对当前Bridge=2CE8E478FC7BA3A78703928BABF4A9C79611CFE90AA55AEB22DC5895A9A7A037，与最终报告匹配；git status仍只白名单8实现文件＋本计划，diff --check通过。
+- 最终模型22组，不再是8组中断版；覆盖实际转化owned wrapper、多raw/stream/SEAL/tombstone、provider/current F/list/安装序列/失败/晚安装、unknown与NOOP、metadata/列表变异/取消、同UUID/失败隔离/两种重入、四线程open/close与SEAL样本。失败/故障注入的WARN是预期保留诊断，不冒充零异常日志。模拟器明确stub调度/Loader/设置/FML边界，首close失败是外部反射故障，不是真实OS内部故障；R/custom provider等未测项保留。
+- C阶段子代理角色不允许项目构建，故Lead亲自用mc_gradle task=compileJava，args=["-Djava.io.tmpdir=C:\\Temp","--console=plain"]，timeout1200000。实际返回BUILD SUCCESSFUL in 36s；1 actionable task: 1 executed。旧Thread.stop/Object.finalize三条删除警告、Loom与Gradle提醒保留，不修无关内容。[调用参数/原工具节选收据](<C:/Temp/reforgedplay-Lead-C1Gate-e6a8157b/compileJava-receipt.md>)清楚标明不是raw stdout冒充。无AP执行日志则不擅称AP实际运行；D的最终build/remapJar仍必需。
+- **C2现可开始，仍只写白名单：** 主改FullReplaySender/ReplayHandler，消费C1 API：一次create/attach→producer包住索引/源获取/publish→READY登记→queued admission一直持到实际runnable退出→实际runnable检查session/generation/connectionEpoch再submitReady；不可exists复用、不可直接Loader.add owned路径。缺index/id/hash/Optional显式失败，输入stream由TWR关闭，ReplayFile仍归Handler。局部文件名SHA1规范化不能未经验证就改变源archive index键的大小写语义。
+- **C2已查到的接线风险：** 原terminate是可恢复的async模式停止标志，不能作永久结束或导致同步模式下跳过最终释放；构造启动async发生在caller赋全局handler之前，worker不能因全局暂未赋值丢掉首包，所有全局owner核验放到实际主线程回调。Handler.getReplaySender在quickMode时返回QuickSender，不得因此误认FullSender的生命周期owner已经换成新回放。
+- 两处旧runSync(restartedReplay)、queued packet helper、worker重启及seek在实际执行时验证terminal/代次/owner；seek保持同lease，不SEAL。最终退出保持同步，先永久阻止资源生产，异常finally仍请求自己的资源回收，不能把整个endReplay改成future或延后旧handler的disconnect/global清除。构造失败只收尾已取得的本任务资源，保留primary/suppressed；正常保存事务和回调顺序尽量维持，不泛化重构所有错误路径。C2验证完成后才能D，D仍需真实ReplayStudio复制交错、更多故障边界、注入/打包核对及最终专用build，真实游戏未授权。
+
+- Lead另核对本地对应版本的[NeoForge POM:193–196](<C:/Users/zhenz/.gradle/caches/modules-2/files-2.1/net.neoforged/neoforge/21.1.82/33512a5a9a22ba47e5685a437be85dae8311276/neoforge-21.1.82.pom#L193-L196>)及[模块声明:360–363](<C:/Users/zhenz/.gradle/caches/modules-2/files-2.1/net.neoforged/neoforge/21.1.82/9f4d8f297af3c8c92b428b5209d0f0a099ed5daa/neoforge-21.1.82.module#L360-L363>)：其自身依赖就是net.fabricmc:sponge-mixin:0.15.2+mixin.0.8.7，与B/C1R离线host实际使用坐标一致。仅确认本版依赖声明，不等于实际NeoForge launch-service运行classpath/全模组顺序已验证，D/游戏边界不变。
+
+C1R原话：这次没有清掉旧疑点来换绿灯，而是让旧失败只留下自己的债；项目构建和真实游戏的签字，仍留给真正跑过它们的人。
+
+### 13.20 C2实际交付与D审查目标（不预先签通过）
+
+- Lead已回读[C2最终报告](<C:/Temp/reforgedplay-C2-20261114-1439-c72e/REPORT.md>)、[33组原始模型日志](<C:/Temp/reforgedplay-C2-20261114-1439-c72e/model.log>)、[Sender/Handler实际diff](<C:/Temp/reforgedplay-C2-20261114-1439-c72e/workspace-sender-handler.diff>)和当前关键源码。报告称仅两份源码变化：Sender相对HEAD+283/-81，Handler+62/-14；C1R五份源码指纹未变。外部源码编译exit0、33组PASS均有明确边界；先前C1的项目编译不能代替这两新源码的项目验证。
+- Sender实现一次create/attach、lazy source/TWR/READY、producer/queued/actual许可、terminal独立async terminate、read-time generation贯穿Netty、所有本sender回调及restart防陈旧、terminal ByteBuf释放。Handler接入构造失败、Full生命周期owner/quick-facing、同步退出/异常finally，以及disconnect/overlay重入后的归属核验。C2没有改其他调用方或C1状态机。
+- C2实际生产Handler/Sender字节码在外部边界stub下执行：MC/GUI/Loader/设置/global holder/事件注册/包转换是模型，许多Handler由Unsafe分配最小字段，不是完整游戏构造。真实Netty和ResourcePackSend packet、真实ZipReplayFile源参与；已测源关闭后Stream closed、部分复制后缓冲仍可读、TWR close时stop，以及实际endReplay在producer尚未退出时同步返回/关闭真实ReplayFile，最后无READY/add。日志中的故意bad URL异常、SLF4J/Log4j外部classpath提示未隐藏，不是断言失败，也不是游戏日志。
+- C2代码及测试使用全新独占外部目录；样本14,412,288B，报告审计外部证据约15.7MB，不碰用户回放/R盘，不覆盖旧证据。D如复跑需fork脚本O及stub/服务资源至新的独占目录，不能覆盖C2收据或把旧PASS当新执行。
+- **D重点1：保存失败与重试契约。** 新ending永久once包含第一次callback/save/close失败；旧方法没有这样的永久门。必须验证save第一次失败、底层恢复后再次endReplay，判断是否把未保存/未close的ReplayFile永久跳过；不要只测重复成功结束。若是回归，在白名单内修回原有重试可能性，不引入新的保存事务设计，不强制close丢待恢复内容。
+- **D重点2：合法前向seek的正向包。** jumpToTime目前每次advanceGeneration，但async nextPacket可能是同一连接已读尚未发送的未来资源包。核查向前跳是否误判它陈旧并永久漏加载；负向旧callback拒绝PASS不能替代这个正向案例。对比无jump、前向jump、真正重连/向后restart，仍保证旧session/terminal绝不重开。
+- **D重点3：短状态锁与阻塞IO。** 当前lease.publish的Files.move在synchronized(this)内。核查慢/阻塞文件系统move是否让stop/endReplay等候其锁；若构造可控外部provider故障证明，需清楚标为边界注入，不冒充真实OS/网络盘事故。不通过绕过terminal原子发布或放松ledger来修。
+- **D重点4：自己的UI清理。** closing callback先换新handler时，归属保护不应顺带漏掉旧overlay自身注销，也不能hide/forceStop新handler；需单独对比自己的资源与全局副作用。完整Quick/setup/世界重启未跑游戏仍不得签。
+- D必须独立审查/重验，执行mc_gradle task=build，args=["-Djava.io.tmpdir=C:\\Temp","--console=plain"]，timeout1200000，不clean/refresh/跳test/改构建。核对最终JAR包含源码/三Mixin登记/实际remap，保留原3弃用警告与旧remap诊断边界，NO-SOURCE不算JUnit通过。可补小型R盘实际路径、NOFOLLOW/写/输出close故障等外部验证（仅自有唯一样本、总<32MiB；卷/权限不可用明确SKIP，不装包/提权）。真实游戏仍未授权。
+- D不预设上述疑点必为bug；给可复现证据/定位/影响再判定。默认不修改生产源码；如需逻辑修复，报告Lead交回C片在原八文件内修，再重委派D，不用增加第9文件或替换路线逃避。完整build即使成功，也不能抵消审查发现的实际回归。
+
+C2报告原话：这次不靠回放关闭后“应该读不动了”守边界；哪怕真实缓冲流还能吐出数据，终止后的 ZIP 也拿不到发布和加载的许可。
+
+### 13.21 D3失败后的原范围最小修复计划（A校正，2026-11-14；非修复完成）
+
+#### 13.21.1 事实、成功标准与权限
+
+- 本A只读回查13.11–13.20、11.9–11.12、实际Folders/Sender/Handler/必要Bridge与第一批anchor实现，并读取[D3报告](<C:/Temp/reforgedplay-D3-20261114-1547-e91d/REPORT.md#L1-L53>)、[UTF-8日志副本](<C:/Temp/reforgedplay-D3-20261114-1547-e91d/review-v4.log.utf8.txt#L1-L33>)、[实际反例输入](<C:/Temp/reforgedplay-D3-20261114-1547-e91d/D3Harness.java#L10-L30>)及[GateProvider](<C:/Temp/reforgedplay-D3-20261114-1547-e91d/GateProvider.java#L3-L21>)。本轮没有运行Java/harness/构建，不把D的执行算本A实测。
+- D3结论是FAIL：真实保存恢复后重试被永久跳过、同连接前向预读资源丢失、move持状态锁阻塞实际endReplay、旧overlay漏清、同路径文件/整task替换后误删foreign marker。build成功33s/6 tasks（5 executed、1 up-to-date）、最终remap JAR转化4/4、独立22＋33组PASS都保留为有效但不足的证据；test NO-SOURCE不是JUnit通过。v4 exit0表示反例成功复现，不表示业务通过。
+- 年代保持：NeoForge21.1.82/MC1.21.1、Java21、Architectury Loom1.7-SNAPSHOT＋Yarn补丁、wrapper8.8；已回读实际构建/属性/NeoForge metadata（另有历史Fabric/mcmod资源，不据此换平台）。不升级栈、不scaffold、不重做B；本轮不声称重新加载了历史技能文件。
+- 用户原13.13八实现文件＋计划授权及必要修复继续有效；成功标准是五反例转为真正正向断言通过，同时原释放链/同步退出/正常播放与C、R清理保持。不能把所有任务永久留存、删验证断言或沿用旧PASS冒充修复。现在仍不可装、不可提交。
+
+| 文件与唯一范围 | B | C3 | 复验D2 |
+| --- | --- | --- | --- |
+| [ReplayFoldersService.java](<src/main/java/com/replaymod/core/files/ReplayFoldersService.java>) | 不重做 | 主修嵌套lease的发布短锁及身份receipt；不改图片入口 | 只读生产代码、真实C/R及注入反例 |
+| [FullReplaySender.java](<src/main/java/com/replaymod/replay/FullReplaySender.java>) | 不重做 | 主修连续前向读/queued资源与回调失效的代次区分 | 真实循环/预读/queued/重连负例 |
+| [ReplayHandler.java](<src/main/java/com/replaymod/replay/ReplayHandler.java>) | 不重做 | 主修退出重试门与自己overlay清理 | 实际退出、重入、新owner隔离 |
+| [ReplayResourcePackReleaseBridge.java](<src/main/java/com/replaymod/core/files/ReplayResourcePackReleaseBridge.java>) | 不重做 | 仅必要：提交前receipt核验/窄lease接口适配，不改释放证明路线 | 审查GLOBAL无IO/lease锁，重跑22组 |
+| [Loader Mixin](<src/main/java/com/replaymod/core/mixin/Mixin_ServerResourcePackLoaderLease.java>)、[MC Mixin](<src/main/java/com/replaymod/core/mixin/Mixin_MinecraftResourceReloadLease.java>)、[ZIP Mixin](<src/main/java/com/replaymod/core/mixin/Mixin_ReplayZipFileLease.java>) | 已有框架保留 | 本片不改三文件 | 仍须转化最终JAR，不能只验旧JAR |
+| [Mixin资源](<src/main/resources/mixins.core.replaymod.json>) | 已登记保留 | 本片不改 | 核对最终登记与remap |
+| [本计划](<plan.md>) | 只读 | 只读 | 只读回报；本A仅顶部状态＋追加13.21，结束后归还Lead |
+
+八实现文件仍是总上限，本片预计只改前三份＋必要Bridge。第一批[ReplayFileOperations.java](<src/main/java/com/replaymod/core/files/ReplayFileOperations.java>)和[Image.java](<src/main/java/de/johni0702/minecraft/gui/versions/Image.java>)只作参考、不得修改；其他源码/配置/测试/依赖/wrapper均不写；不Git写、不安装、不启动游戏或whale-craft。任何第九实现文件或新平台强制能力必须先停问。
+
+#### 13.21.2 F1＋F4：同步退出可重试，自己的清理不等于全局副作用
+
+- F1定位：[Handler:195–200、265–338](<src/main/java/com/replaymod/replay/ReplayHandler.java#L195-L338>)。保留不可逆生命周期ending（或等价terminal）阻止setup/worker复活；另用最小in-progress/completed门处理endReplay：重入正在执行时返回，真正完整成功后重复调用返回；任何callback/save/close/退出清理失败都释放in-progress，允许后续再调用原同步退出流程。completed不能在finally仍可能失败之前先签成功。
+- 重试仍按原save→close顺序实际尝试，正常成功只退出一次；sender.stop/terminate继续once-only/幂等且永久terminal，资源回收finally仍执行。不新建保存事务、不强制close清空恢复材料、不伪造保存完成或重开sender；primary与suppressed保留。finally本身抛错也必须释放in-progress。
+- F4定位：[Handler:288–326](<src/main/java/com/replaymod/replay/ReplayHandler.java#L288-L326>)：自己的overlay.hide/unregister从“当前全局handler是我”的条件中独立出来，仍在原同步退出的自有UI收尾位置操作this.overlay；不能借finally强制close ReplayFile。新handler已接管也必须清自己的旧overlay，绝不取得/隐藏新overlay。
+- 所有disconnect/world/timer/forcefullyStopReplay/screen/global-holder副作用继续逐段核验owner，尤其closing、disconnect、overlay可重入调用之后重新核验；先前一次owner判断不是后续授权。回调/overlay抛错按F1允许重试，不把局部注销成功当完整end成功。构造失败等既有生命周期边界不泛化重构。
+
+#### 13.21.3 F2：read/stream provenance与seek UI callback失效最小分开
+
+- 定位：[Sender:1096–1119、1224–1233](<src/main/java/com/replaymod/replay/FullReplaySender.java#L1096-L1233>)与[read-time dispatch/queued admission](<src/main/java/com/replaymod/replay/FullReplaySender.java#L1409-L1509>)。同连接连续前向rush只改变desiredTimeStamp，不推进lease的read/stream代次；last100/next150/jump200的合法预读与已queued资源请求必须保留原许可并最终加载一次，不重新读取/消费丢失。
+- 若需让旧pause/camera/setup等调度意图在每次seek失效，在Sender内加一个窄callback意图序号，由普通UI/控制回调捕获核验；它不用于作废同stream资源producer/admission。现有lease generation专管真实read/connection边界，dispatch仍携带PacketData读取时的代次。不能把任意旧PacketData改标current，不能给过期queued许可续命。
+- 明确边界表：连续前向且无restart/reconnect→read代次不变、UI意图可失效；已确定向后restart/EOF重启/实际换连接→read代次失效并按原流程丢弃旧预读重读；Quick切换→原有Full资源边界仍失效；terminal→所有生产/queued/actual add永久拒绝。连接loader identity＋connectionEpoch＋handler owner检查保留。
+- 集中核对jump、restartReplay、setChannel/setup、Quick及sync restart的推进点，避免同一重启的推进次序误杀它自己的runSync。新串流读取只能捕获新read代次；普通回调失效不能偷偷改变资源admission契约。原UI回调、真正旧连接、旧session及terminal反例均继续拒绝。
+
+#### 13.21.4 F3：短锁预约→锁外move→短锁登记；生产者到真实退出
+
+- 定位：[Folders:148–207、251–285](<src/main/java/com/replaymod/core/files/ReplayFoldersService.java#L148-L285>)。copying串行化可以保留，但stop/endReplay绝不获取该长操作锁。lease状态锁只做许可检查、发布reservation/in-flight状态及内存ledger更新；create/readAttributes/link/stream/flush/close/move/isSameFile/delete、progress/MC调用全部在状态锁外，GLOBAL里也不做这些IO或取lease锁。
+- 保留producer许可覆盖allocate、copy/TWR、move及最后登记/异常收尾的真实全过程，不能提前close许可让release越过还在操作的producer。先在短锁核验并预约唯一staging→completed关系（不是READY）；锁外执行原同目录无REPLACE_EXISTING、无ATOMIC_MOVE的move；不增加新发布硬要求。
+- move正常返回后，无论stop/换代是否已经发生，都先在短锁把同一file receipt从staging映射到completed并登记owned final；不能因terminal漏记已经搬出的ZIP。随后只有许可仍有效且文件核验成功才入READY/返回可提交路径；否则不入READY、不registerReady/add，按终止/过期失败退出并留给既有释放门回收。
+- move抛错/结果不明：JDK允许源/目标均存在甚至目标不完整；reservation里的candidate不是所有权证明，不按exists抢认或删它。记录phase、staging、completed、receipt和原异常，READY为空，保守保留本task及witness，不做回滚/新事务。move成功但后续identity核验失败也不READY，不能把完整性或身份不明洗成可删除。
+- stop只短锁关闭admission并通知，actual endReplay不join producer；阻塞move恢复后producer才归零，之后仍须UUID/provider/current-cycle/首close/SEAL全链。F3改变的是锁内IO位置，不降低任何释放ledger门槛。
+
+#### 13.21.5 F5：纯JDK身份receipt，优先可用witness；不能将能力变成播放硬门
+
+**可行性与限制：** 路径/realpath、普通文件类型、hash/size/mtime、同一路径isSameFile(path,path)都不是所创建对象的identity。建议只在Folders.ResourcePackLease内嵌小receipt；不造通用存储框架。可用fileKey辅助/提供有效key凭据，可用不同路径硬链接witness固定普通文件身份。两者均不可用时保留清理而非阻断原可用发布/播放；这与第一批“始终anchor且不支持即搬移失败”的已批合同不同，不能照搬那项硬限制。
+
+1. **创建时登记，不迟到认领：** task独占创建后即登记路径和可取得的目录key；用CREATE_NEW建私有普通marker。staging的CREATE_NEW成功即登记file receipt（含当前路径、创建来源、可选key、witness状态），在写入前/过程中完成可用身份锚定；所有成功创建的marker/witness目录/链接也立即记账。后续不能在清理时才对现存文件取新key当原receipt。初始创建→锚定窗口仍依赖可信父目录/非恶意独占契约。
+2. **witness在task外、同卷、独占：** 在已选择canonical root里创建唯一兄弟witness目录，不在task内部、不转C盘/系统temp、不依赖getFileStore或DOS；createLink本身检验能力。为task marker及每个staging普通文件各建原本不存在的不同路径硬链接，NOFOLLOW检查两端普通/无reparse，再isSameFile(两不同路径)确认。不能硬链接目录。C/R已知原语可用，但本轮lease布局必须新测。
+3. **task凭据不等于directory inode：** 有有效目录key时核对它；Windows null key时以task内marker与task外witness的同对象关系证明“仍是拥有这个marker的任务布局”。整个task移走后新建同名目录/复制内部marker会失配，外部witness不会一起被搬进去。它不是原目录inode的绝对证明；若有人将原marker硬链接/移植进另一目录，或连同可信父目录及witness一起克隆/置换，此方案不承诺识别。禁止称为ACL沙箱或恶意并发防护。
+4. **文件receipt跨rename不重建：** staging→final沿用同一receipt/witness，move成功后把receipt映射到新名称并核对；不得按相同hash名称复用未登记对象，不覆写已有ZIP/marker/link。每次已有READY复用、注册、实际submit及owned wrapper首次open的现有边界检查，应核对task与该file的已有凭据。Bridge如需补submit前check，须在GLOBAL外、admission内，调用前后仍核验permit/connection/owner，不把IO结果当永久锁。
+5. **不支持与失配必须区分：** 首次无法取得有效key且createLink/isSameFile能力不可用，只记“cleanup ownership unprovable”与原因/路径，不立即令ACTIVE变terminal；完整复制/hash/TWR/无覆盖发布/原有路径类型检查仍照常，原可用平台可继续使用。没有身份能力的使用只能按既有可信目录合同说明局限，不能宣称已防替换；最终释放只转one-shot RETAINED、零delete、不宣称CLOSED。有效凭据一旦建立，后续失配/消失/读取错误则禁止本次使用或删除，不能降级为“unsupported”继续接受已知替换。真实复制/close/move失败不吞成能力不支持。
+6. **窄兼容降级：** 可用且已记录的稳定key可作为key-only凭据（包括task/目录或marker及每file的必要覆盖），null不能补成成功；key可复用的provider限制必须承认。优先witness＋可比key交叉核验；缺任何必要对象的有效凭据，整task清理不授权。可选建witness失败可留自身小遗留并诊断，但不换根、不新增硬链接/FileStore/fileKey/DOS强制要求，也不主动修改权限。若C发现无法在不阻断原合法发布/使用的前提落实，只交已能做的修复并停报，平台阻断方案待用户另行确认。
+7. **删除只在全链已SEAL且一次尝试：** 先快照ledger、锁外预核验task＋每个payload＋marker/witness（缺失/歧义保留，不扫描认领）；再每次删除前复核task和对应receipt，先删owned payload目录项，之后才删已核实的file anchors，最后核验并清task marker/自己的空task、外部marker anchor/自己的空witness目录。各receipt直到自己的payload删除完成都不能提前销毁。非登记项导致空目录删除失败就RETAIN，不递归、不删除根或外来项、不重试后来替换文件。正常C/R必须task与所有anchors全无才CLOSED。
+8. **最后窗口公开：** marker/anchor最后删除后无法再用已删凭据核验空目录，最后check→delete也非条件原子操作；依赖可信root、非恶意且无并发置换的自有清理窗口。只有有效key时也不承诺抵御删除后ID复用。目录inode、任意marker移植/保留硬链接的克隆及敌手TOCTOU不在保证内；新普通文件/复制task替换的D3两反例则必须确定性保住foreign marker并RETAIN。
+
+#### 13.21.6 本轮官方依据（2026-11-14查阅）与未验证项
+
+| 事实/决策 | 可核实依据及边界 |
+| --- | --- |
+| createLink(Path,Path)是optional，通常要求同文件系统；不覆盖已有项；isSameFile(Path,Path)可能直接equals快返 | 已搜索并读取[Java21 Files官方API](<https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/nio/file/Files.html>)；只用public API，不以相同路径测试、FileStore查询或盘符当身份能力证明 |
+| 非原子move失败后源/目标状态不确定；delete可能与其他FS操作非原子 | 同一[Files API](<https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/nio/file/Files.html>)；因此不明move保留、不虚构条件delete，也不偷偷加ATOMIC_MOVE硬要求 |
+| fileKey允许null且仅静态FS下保证唯一，删除后可复用 | 已读取[BasicFileAttributes.fileKey](<https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/nio/file/attribute/BasicFileAttributes.html#fileKey()>)；key-only路线也须说明provider/复用边界，不把null、mtime或摘要当身份 |
+| Windows public null key不妨碍两个不同路径比较native文件身份 | 已重读[OpenJDK21u Provider](<https://raw.githubusercontent.com/openjdk/jdk21u/master/src/java.base/windows/classes/sun/nio/fs/WindowsFileSystemProvider.java>)与[Attributes](<https://raw.githubusercontent.com/openjdk/jdk21u/master/src/java.base/windows/classes/sun/nio/fs/WindowsFileAttributes.java>)：isSameFile分别开句柄，比较volSerial/fileIndex，而fileKey返回null。这是官方21u实现解释，不是当前Oracle二进制/驱动逐字节证明 |
+
+生产绝不import/call sun.*、native、反射内部或加opens/依赖；官方内部源码只是解释证据。第一批[现有anchor代码:129–135、240–250](<src/main/java/com/replaymod/core/files/ReplayFileOperations.java#L129-L250>)可读参考，不能修改或直接套其新增硬要求。UNVERIFIED：新task外witness布局、当前JDK21 C/R成功零残留、unsupported identity兼容降级及全部修复交错；本A没跑，交C3/复验D2签真实结果。
+
+#### 13.21.7 C3→复验D2的执行顺序与必测停点
+
+1. C3顺序小片：先Handler F1/F4，再Sender F2，再Folders F3/F5及必要Bridge适配；同一工作区不并行写。外部编译/反例输入fork到新的独占C:/Temp目录，旧D3/B/C证据全部只读保存；本A不创建外部harness。每片记录精确源码指纹/范围及未通过项，最终八文件及计划之外零业务变更。
+2. **F1**：真实ZipReplayFile写pending entry→暂移自有sidecar令第一次save失败→原样恢复→第二次实际Handler.endReplay必须真正save/close并保存内容；closing/save/close首次抛错后修复重试、重入保护、重复成功once-only均测。不能以手动direct save/强制close替代第二次endReplay的断言。
+3. **F2**：无jump对照；last100/next150/jump200同连接实际循环→opens/add各一次；已queued未执行资源在前向jump后仍合法；真正重连/向后restart/EOF/Quick/旧UI callback/terminal与新session负例继续拒绝。复用真实dispatch/producer/queued逻辑，不复制算法作模型。
+4. **F3**：fork GateProvider（必要时仅在新外部副本正确委派可选createLink，不改旧输入）；latch卡在move时stop及实际endReplay必须在不释放latch、不join producer下返回，producer尚持有且READY/add为零；恢复move后核对owned final receipt已登记、无READY/add并最终按全链清理。再测写/flush/输出close/move先失败、move已生效后抛错、stop交错及输入close，未知结果必须RETAIN。注入仍标外部provider，非真实OS故障。
+5. **F4**：closing中换handler、disconnect/overlay回调中重入换owner；旧overlay真实边界hide/unregister已调用、新overlay仍可见，所有新对象/world/timer/forceStop/screen不受旧退出影响。只跑UI stub必须明确非游戏验收。
+6. **F5**：实际C、R独占小样本分别测正常单/多ZIP、重复hash复用、partial/cancel及完整释放，全链成功后payload/task/witness/anchors零残留且用户root不删。再真实同路径ZIP替换、整task move＋新建/复制替换（含复制内部marker）、外来额外项、missing/失配witness、同size/mtime/hash但不同对象、既存candidate不覆盖：foreign marker和原移走对象不变、one-shot RETAINED。不得为了PASS清掉foreign或跳过release。
+7. **unsupported identity负例必需**：外部provider给null key并拒绝createLink/isSameFile能力，真实完整发布/使用路径仍可走（仅按已说明的可信目录合同）、退出不删任何未证明对象且RETAINED/诊断明确、不冒称CLOSED；另测有效key-only和已建立witness后失配不能降级。GateProvider原类未实现createLink，不能把它的UOE误当实际C/R能力。C/R不可用如实SKIP，但不据SKIP签“正常清理已验”。样本累计保留总量<32MiB，不读用户回放、不装包/提权/改盘。
+8. 复验D2独立重跑22＋33及上述修复断言；provider/current实际成功cycle、UUID票据、首close sticky、metadata/overlay/fresh factory、SEAL/tombstone、无完成future等待等原门全部保留。旧三个Mixin未变可沿用定位解释，不沿用旧artifact通过替代最终证据。
+9. D2专用工具mc_gradle：projectDir=C:/Users/zhenz/Desktop/ReForgedPlay-1.21；可先task=compileJava，最终必须task=build；args=["-Djava.io.tmpdir=C:\\Temp","--console=plain"]，timeoutMs=1200000。不clean/refresh/跳test/注入Gradle任务/装依赖；保留原警告及真实任务摘要，NO-SOURCE不当测试通过。最终non-dev-shadow remap JAR重新取指纹，实际最终JAR优先classpath、独立JVM重跑4/4目标转化及Mixin登记/descriptor/合成回调顺序检查，不只验开发classes或旧JAR。
+10. 全部通过也仅签源码/外部反例/构建/独立转化的实际层次；NeoForge launch-service/全模组顺序/完整Quick世界与渲染队列/真实游戏UI仍未授权未测。若五项尚一FAIL、正常C/R不能清理或需扩大白名单/强制平台能力，停报Lead，不安装、不提交，不用成功build掩盖。
+
+**是否可直接C3：可以，在既有授权的前三主修＋必要Bridge窄适配内开始，不再等B；这不是声称修复已完成。待确认项仅是若实现证明无法维持原发布/使用兼容、必须新增平台阻断能力/目录inode或敌手级保证/第九文件时的扩大方案，当前没有自行批准这些扩大项。本A结束归还计划写权Lead。**
+
+A的一句话：让失败还能重试，让合法的包仍能到达，让最后一次删除真的拿得出属于自己的凭据。
+
+### 13.22 C3a交接、旧证据覆盖事故与顺序C3b
+
+- Lead回读[C3a报告](<C:/Temp/reforgedplay-C3a-20261114-6bd2cda2/REPORT.md>)、[实际增量diff](<C:/Temp/reforgedplay-C3a-20261114-6bd2cda2/C3a-only-source.diff>)、[F1/F2/F4修复正向日志](<C:/Temp/reforgedplay-C3a-20261114-6bd2cda2/review-v10.log>)，并用原生ops_bash亲跑sha256sum核对当前Sender=a726713fb13c113a4441aa7a336bd72b077c9f89372a0f6b902dc85b3fc3de05、Handler=b31b453944344801223ba264c7c1a8b44cc6600eb12afbebe348197347a32686。git diff --check通过，仅LF/CRLF提醒。
+- C3a仅写上述两源码。F1保留ending/terminal不可逆，分离in-progress/completed及constructionFailed，完整body和finally成功才完成；真实sidecar恢复后第二次实际save/close，成功再次调用跳过。F2分离controlEpoch与stream provenance，前向预读和queued资源保持，真正边界仍失效，协议GameJoin不被普通控制意图取消。F4独立hide自己overlay，仍逐段保护全局归属。源码已写不等于所有模式游戏行为通过。
+- [新33组日志](<C:/Temp/reforgedplay-C3a-20261114-6bd2cda2/model-v5.log>)、[新增20组日志](<C:/Temp/reforgedplay-C3a-20261114-6bd2cda2/extra-v4.log>)和F1/F2/F4实际修复断言通过；真实workspace四源Java21外部编译成功，MC/GUI/Loader/转换/Unsafe边界明确。没有项目build、22组重跑、最终JAR或游戏验收；F3/F5有意未跑未修。报告的本轮保留合成样本25,359,531B，仅说明该次审计，不能冒称整个历史任务总量。
+- **不可撤销的程序失误：** 首次fork把斜杠格式脚本复制后，用带反斜杠的Windows Path字符串替换，替换未命中且未先停验，首次compile/model仍写到旧D3。旧D3的原始33组model.log、classpath/version/javac日志、生成classes/stubs/model source list遭覆盖。当前该位置内容不再是D3原收据，无法真实恢复；不能把新执行或覆盖后快照冒充原始证据，也不追改历史失败/成功文字来掩盖。详见C3a报告3–6行及其incident-overwritten-D3快照。
+- D3的REPORT、D3Harness/GateProvider及指纹、review-v4原始/UTF-8反例、C1的22组及转化证据未被该次调用写入；B/C1/C1R/C2原证据未写。五反例事实仍有保存的独立复现证据。原D3独立33组结果只能按历史交接记载，已失去原model.log这条可独立复核链；后续D2必须全部新执行，不将旧D3 classes/stubs当不可变基线。
+- **C3b输出保护先于运行：** 不直接运行任何旧fixed-O脚本，也不以“复制后已替换”当足够保护；建立明确的新独占输出根/统一参数驱动，执行前列出并断言compile -d、重定向、生成stub、设置/fixture/cache/样本/变换输出等所有写入目标属于新根或原批准生产范围。旧路径只允许明确只读classpath/源码输入；检查实际配置未命中、旧写根残留、非空/已有输出覆盖即拒绝运行。记录原目录前后指纹；若再次发现意外写入先停并列清损失，不伪恢复。不为预算删旧证据，小样本仍须实际审计计划限额。
+- C3b顺序只修Folders嵌套lease的F3/F5及必要Bridge，保持本次Sender/Handler指纹，三Mixin/资源不动，plan由Lead维护。严格13.21.4–.5：锁外IO、producer覆盖move/登记；成功move后即使terminal也记owned final但不READY；失败/歧义保留；创建时receipt、task外witness、有效凭据失配禁止降级、无身份仅RETAIN且不新增播放硬门。正常C/R零task/anchor残留，unsupported负例零delete，不用全部永久保留换PASS。
+- D2额外正向关注：Full已打开reader/read-time代次被Quick或换channel推进失效时，后续必须能重建合法读取而非一直丢包；尤其Full.currentTimeStamp=0、仍有open reader/prefetch、从Quick切回后sendPacketsTill(0)可能no-op这一边界。当前只是主代理源码审查目标，尚未执行，不当已发现或已修；完整Quick/world仍未验收。
+- C3b交接后再专用D2完整build/最终JAR转化与全部必要正负例，旧Jar不因C3a通过自动合格。原八文件白名单/不改配置依赖测试/不Git写不装包不游戏不whale-craft/不带权限升级字段继续适用。
+
+C3a原话：让修复的绿灯只覆盖真正跑到的边界，也把我这次误写旧证据的责任完整留在交接里。
+
+### 13.23 C3b候选交付及D2待启动（目标自动续作未激活）
+
+- Lead回读[C3b报告](<C:/Temp/reforgedplay-C3b-20261114-1718-9d82e6f4/REPORT.md>)、[实际增量diff](<C:/Temp/reforgedplay-C3b-20261114-1718-9d82e6f4/C3b-only-source.diff>)关键发布段、[新增33组UTF-8日志副本](<C:/Temp/reforgedplay-C3b-20261114-1718-9d82e6f4/model-06/new.log.utf8.txt>)及全部PASS摘要，亲跑原生ops_bash sha256sum/git status/diff --check。四源指纹匹配收据：Folders3404daa49b8c68706c74bb0b8aca0c97592b7072725bdca057d3fc267e67e024；Bridgebed802d7c16410b962dcd145b8403db574194ba2a69659aa252886d7eda3a3f1；Sender仍a726713fb13c113a4441aa7a336bd72b077c9f89372a0f6b902dc85b3fc3de05；Handler仍b31b453944344801223ba264c7c1a8b44cc6600eb12afbebe348197347a32686。白名单仍八实现文件＋计划，diff检查通过。不是Lead独立重跑全部模型。
+- 本片仅Folders嵌套lease+259/-33与Bridge+9/-1。锁外move，producer持到rename/登记退出；正常move后即使终止也沿用同一receipt记final、不READY，真正不明move整task留证零delete。可选task外witness/双anchor加可用key，已建立凭据失配不能洗成unsupported；无有效能力仍可按可信目录合同发布使用，但one-shot RETAINED、零delete。注册/实际submit检查在GLOBAL外且复核permit/connection。Sender/Handler和三Mixin/JSON未改。
+- C3b新33组的真实C/R均public fileKey=null，正常多ZIP/READY复用最终CLOSED、task/witness/anchors零残留，根保留；受控move latch下实际stop0ms、实际endReplay4ms返回且producer仍1，之后final记账/正常回收；这是受控provider IO而不是真OS挂起事故。真实同内容ZIP/whole-task复制替换、第二个payload替换均保全foreign并RETAIN；unsupported分支能publish/register/submit/open但零delete，已知key/witness变化拒绝使用。实际symlink权限不足SKIP，不伪称通过。
+- 报告另列当前四源外部Java21编译成功、22＋原33＋20及F1/F2/F4正向断言通过；C1R22仍用只读历史wrapper输入，不替代最终JAR转化。MC/GUI/Loader/FML/注册/包转换及Unsafe/受控provider、key-only合成key/定制Path反射OwnedZip绑定均明确分层，不冒充真实NeoForge/Quick世界/渲染队列或GUI游戏验收。
+- [旧目录handoff审计](<C:/Temp/reforgedplay-C3b-20261114-1718-9d82e6f4/old-audit-handoff.json>)：1771文件changed/added/removed全空，只说明C3b未再改变开始时的旧目录，不恢复13.22已经损坏的原D3收据。本片新样本2,967,413B＋C3a给定25,359,531B=28,326,944B＜32MiB；这不是全部历史B/C1/C2/D3文件总量。C2小型化fork仅65536→12288随机字节，仍跨8192真实buffer，原部分复制/关闭断言保留；D2新样本要继续核验预算，不删旧证据。
+- **新的程序性违规仍须保留：** C3b五次外部新文件write误带被禁止的sandbox_permissions字段及无效justification；一次source edit携workspace-write被拒，未修改源，后续用原生ops_replace成功。没有获批准/扩大权限，但参数行为不合规，不能以没有提权效果代签。其角色禁止技能/联网，报告未虚构技能加载；实际JDK/API源码核查是另一证据层。Lead在本轮仅使用不含这些字段的read/grep/ops操作。
+- 凭据不等于null-key目录inode或原子条件delete，marker移植/恶意克隆/父路径并发/最终check-delete窗口和key复用限制照旧。正常支持能力的成功任务不能全部改成RETAIN来凑绿；不明/缺证据任务不删也是明确降级，不能宣传任意RAMDisk完全自动清理。
+- 本次get_goal实际返回phase=active、activation=disarmed。Lead只核对交接并记录状态，未resume目标、未启动D2/新构建或游戏，等用户明确继续。之后D2必须独立检查当前最终源码，重跑全部必要正负例、保留13.22 Quick零时间戳/open reader审查目标，专用mc_gradle build -Djava.io.tmpdir=C:\Temp --console=plain及新最终remap JAR优先classpath转化4/4、登记/descriptor/回调顺序；NO-SOURCE不当JUnit。原范围/不Git写/不装包/不动配置依赖测试/不游戏规则不变。
+
+C3b原话：终止不该等待磁盘，也不该让已经搬出的文件丢失归属；没有拿到凭据可以留存，但拿错凭据不能当作没支持过。
+
+### 13.24 用户明确继续D2与验收输入冻结
+
+- 用户本轮直接说“继续D2”。Lead加载当前java-build/neoforge技能，get_goal读rev6/disarmed后恢复到rev7/armed；首次多余edit专属参数的resume被拒且未变更目标，改正参数后取得实际恢复收据。不是把后台完成通知当用户重新激活。
+- 重新只读回查wrapper=8.8、gradle.properties目标1.21.1/21.1.82、build.gradle仍Loom1.7-SNAPSHOT/sourceCompatibility21，不采技能新模板升级既有项目。亲跑四源sha256sum，仍与13.23完全相同；git status只原八实现文件＋计划，diff --check无错误，仅LF/CRLF提醒。D2期间Lead不修改生产源码，计划也在本次冻结后等交接再更新。
+- D2按13.21–.23独立审查并新执行22/33/20/新33与五缺陷正负例，不把C3b的外部绿灯当独立签字。优先检验13.22已列的Quick/零时间戳/open reader边界：初始无reader的sync0 no-op与已有失效reader/prefetch的0不是同一情况，不能只测拒绝旧包，必须保证合法新stream能重建继续。若确认回归，附真实最小生产代码复现先交Lead/C，不为通过测试改生产或断言。
+- 新独占D2输出根、写目标预检、旧目录前后hash保护；禁止直接运行旧fixed-O脚本或复用旧D3生成classes/stubs作为不变基线。所有新文件用不携权限字段的原生ops生成/修改，工具若无法不带字段使用则停报，不以当前danger值或没有实际提权为借口。不得覆盖、重建或伪恢复13.22丢失原始收据。
+- D2新保留合成样本限制4MiB内，继续使用C3b小型化但跨8192真实buffer的测试，不删除任何旧证据。C3a＋C3b已28,326,944B，加本次4MiB仍低于32MiB；类/JAR/日志与合成样本分开审计，不宣称全部历史文件总量。C/R只唯一私有根；卷/权限不可用如实SKIP；不改ACL/卸载盘/装包/接触用户回放。
+- 完整项目构建必须专用mc_gradle projectDir=C:/Users/zhenz/Desktop/ReForgedPlay-1.21、task=build、args=["-Djava.io.tmpdir=C:\\Temp","--console=plain"]、timeout1200000；不clean/refresh/跳test/注入Gradle任务，不改依赖或实际配置。核对新non-dev-shadow JAR内容/指纹及优先classpath真实转化4/4、Mixins登记/实际descriptor/F-list和正常RETURN顺序。NO-SOURCE不是JUnit通过，工具输出节选不是raw stdout。
+- 通过构建仍不能抵消review失败。D2没有生产修复权限；大/小逻辑缺陷均先报告定位、预期/实际与层次，由原范围C处理后再D复验。真实NeoForge launch-service/全模组顺序/完整Quick世界/GUI/渲染队列仍不启动、不预签游戏验收。所有门通过才由Lead复核实际diff并停等用户自行commit。
+
+### 13.25 D2实际FAIL/F6及C3c最小修复（原白名单内）
+
+- Lead回读[D2完整报告](<C:/Temp/reforgedplay-D2-20261115-1651-8e73c9a1/REPORT.md>)、[warmzero可读失败日志](<C:/Temp/reforgedplay-D2-20261115-1651-8e73c9a1/quick-03/warmzero.log.utf8-second.txt>)和当前Full的1333–1415。亲跑Sender SHA256仍a726713fb13c113a4441aa7a336bd72b077c9f89372a0f6b902dc85b3fc3de05，status仅原八实现文件＋计划、diff检查通过。D2审计生产/计划554文件与旧证据3229文件全无变化，未带权限字段，旧损坏D3收据未伪恢复。
+- HIGH F6已由生产路径实际复现，不再只是待查：实际Full sendPacketsTill(1)→(0)自行形成zero/open/prefetch，未注入reader/generation/timestamp/prefetch；实际Handler进Quick、模型Quick时间300、退出。旧epoch1→current3，旧reader读3/close0，freshOpens仍2、restart仍1、decoded/sourceOpen/loaderAdds全0，100/200合法包消耗后被正确旧代次门拒绝。原日志exit1未改；MC/Quick/world/setup/decoder边界明确，不称游戏验证。之后真正reset/EOF仍可能恢复，不夸成永远不可恢复。
+- D2独立当前源码22＋33＋20＋新33及F1/F2/F4正向通过；F3实际stop0ms/end7ms先于move latch返回，F5真实C/R正常CLOSED/全部anchor清光，unsupported可用但不删，已知替换拒绝。这些只签各自实际层次，不包含失败F6。
+- 专用完整build真实成功53s、6 tasks(4 executed/2 up-to-date)、test NO-SOURCE不是JUnit；新non-dev-shadow JAR17,481,741B，SHA2566a5f3eb44e38a64dce4ba0e2abbb0f897460a891f96ce7093f95c8840bb74e3b。D2快照/原daemon字节与工具节选区别保留，最终JAR优先classpath真实Sponge Mojang4/4及ASM23方法/descriptor/F-list/成功正常RETURN检查通过；这不是F6合格或实际NeoForge launch签字。
+- **C3c只写FullReplaySender.java**，不写Handler/Folders/Bridge/三Mixin/JSON及任何其他源码，plan只读。修复前先核对同步发送的timestamp-only no-op：若已打开reader或prefetch携带已失效的stream generation，应在这个早退判定前安排已有真实restart路径，真正close旧reader、丢旧prefetch、恢复registry/世界已有重启边界并重新getPacketData，让新读取自然捕获current generation。不得直接改replayInGeneration给旧stream续命，不得修改PacketData.generation，不放宽dispatch/permit/connection/owner/terminal门。
+- 保留无reader/无prefetch的初始sync0 no-op，不为单纯控制意图变更或同stream前向rush制造restart；正常>0 Quick返回/倒退/实际换channel仍正确重建。优先一个窄同步路径检查，避免把修复扩成模式/保存事务/协议框架重构；如果发现必须跨白名单或新强制能力先停报。异步/重入可检验，但没有实证不顺手改未涉路径。
+- C3c新独占外部目录，统一OUTPUT_ROOT/新输出名，旧固定路径脚本禁止直接重跑，旧source/classpath只读，before/after hash保护，禁止权限字段/提权。角色若禁止skills不虚构加载，使用实际源码/JAR接口。外部编译当前四生产源码，真实D2 warmzero正例应旧reader关闭/newreader+1、restart+1、合法100/200 decoded2/source1/add2；保留失败输入/强断言不放宽。补Quick目标0再后来正向目标、同timestamp换channel、warm/cold0、同stream前向、terminal/owner、真实restart与重复Quick往返。源新增只一文件，其他指纹必须保持。
+- D2保留样本1,188,315B，使C3a/C3b/D2累计29,515,259B；C3c预算≤1MiB，后续D-final预算≤2MiB，合计仍低于32MiB，不删除旧证据换预算。继续小型真实ReplayStudio跨8192 buffer样本，不一律ByteArray替代，类/JAR/日志与样本分别审计。C3c不跑项目build，交D-final专用完整build与新最终JAR4/4及必要全回归；任何程序/模型/映射失败原日志保留，不伪造成功。
+- 本轮目标尚未达到，维持active/armed，不标完成/不删除活跃目标，不交付/安装/commit。所有门通过再按用户要求结束活跃目标并停等人自行提交，游戏未授权仍不启动。
+
+D2原话：旧包被正确拒绝，只守住了一半；合法的新串流也必须真的有路回来。
+
+### 13.26 C3c八行候选交接及D-final冻结
+
+- Lead回读[C3c报告](<C:/Temp/reforgedplay-C3c-20261115-1735-c4f8219b/REPORT.md>)、[最强warmzero正向衍生日志](<C:/Temp/reforgedplay-C3c-20261115-1735-c4f8219b/quick-02/warmzero.log.utf8.txt>)和实际Full1333–1365，亲跑四源sha256sum/status/diffcheck。仅Full+8/-0：同步同timestamp早退前，现存reader/read-generation或prefetch-generation失效才设已有restartPending；复用真实close/reset/restart/reopen，不重标旧包，也不在无reader/无prefetch初始0制造重启。同stream前向/仅control变更保持。
+- 当前Sender=f9ed797110d81adb7958c1762ce02218ef04c5d3947cbfb02a6e9dba5790348f；Folders3404daa49b8c68706c74bb0b8aca0c97592b7072725bdca057d3fc267e67e024、Bridgebed802d7c16410b962dcd145b8403db574194ba2a69659aa252886d7eda3a3f1、Handlerb31b453944344801223ba264c7c1a8b44cc6600eb12afbebe348197347a32686均不变。其他七实现文件/plan在C3c未动；Lead本次仅写计划，D-final开始后不再改候选或计划直到交接。
+- 最强D2实际public sendPacketsTill(1)→(0)原输入与强断言字节相等，新child exit0：oldEpoch1→4、oldClosed1、read-source opens2→3、restart1→2，decoded2/source1/add2。不是Injected reader/time/prefetch用例。原D2exit1留原处。Quick目标0后继续、同timestamp换channel、cold0、真实warm>0、reader-only/prefetch-only、重复Quick、restart自身换channel等分别通过，注入/MC/Quick/decoder/world边界照实说明。
+- C3c四源外部编译成功；22＋原33＋F1/F2/F4通过，F3/F5只32组，真实R因本片单C输出根约束SKIP；原20仅执行3个相关未改断言，**不是完整20**。D-final必须补全20/真实R正常清理，不能把前一版的证据悄悄算本版新执行。实际symlink权限不足仍SKIP；完整NeoForge launch/世界/UI/render/game不预签、不启动。
+- C3c旧证据4036文件零变化，生产/计划554与非生成workspace1347仅Full变化；当前四源与编译snapshot一致。没有权限字段调用/旧证据覆盖/伪恢复。外部Quick stub缺方法、非Sharable decoder/Quick夹具等初次失败均留各自日志，修的是新外部夹具、不改业务断言；字节序/编码衍生标签不混成原stdout。
+- C3c全部保留样本1,030,911B，累计30,546,170B。D-final全部新迭代样本≤2MiB，合计≤32,643,322B＜32MiB；不删旧证据腾预算。真实R可额外用R:/Temp内全新唯一私有测试根，只允许该根的合成样本与测试自有空root善后；这项明确例外解除C3c只能C输出根导致的R跳过。C日志/类/stub/cache/fixture等仍新D-final OUTPUT_ROOT，R例外同样预检/审计，不扫/删R:/Temp根或其他任务。
+- D-final只读生产和计划、独立检查8行F6＋六缺陷正负例/22/33/完整20/新33与Quick矩阵，R不可用则如实SKIP并说明未签门；不为“最后一次”降低断言。专用mc_gradle build -Djava.io.tmpdir=C:\Temp --console=plain/timeout1200000，不clean/refresh/跳test/改构建，最终non-dev-shadow JAR重指纹并优先CP真实Sponge4/4/登记/descriptor/回调顺序。NO-SOURCE不当JUnit通过，外部probe不当实际游戏。
+- 全部新输出明确参数/新名字，不直接跑旧fixed-O，不碰损坏D3生成基线；旧证据before/after hashes，禁止权限字段/提权，合规ops工具不可用就停报。新增逻辑问题先报告，原范围C处理后再验，不自行修代码或扩文件。本轮仍未达目标，不标complete；全部门通过后再结束活跃目标并停等用户commit，实际游戏仍未授权。
+
+C3c原话：旧包继续被拒绝，但现在合法的新串流也真正重新打开，并把该到的包送到了边界。
+
+### 13.27 D-final PASS与Lead最终源码提交检查点（只签授权层）
+
+**结论：第三批P的实现、可执行外部回归、真实C/R小样本、完整项目build及独立最终JAR转化门已通过。可以交用户审查并自行提交本批源码；不是实际客户端/全模组/游戏验收，不代安装/commit，不进入下一批。**
+
+#### 最终实际范围与完整差异
+
+Lead回读[D-final完整报告](<C:/Temp/reforgedplay-Dfinal-20261115-1800-52f1c8ab/REPORT.md>)、[真实构建工具收据](<C:/Temp/reforgedplay-Dfinal-20261115-1800-52f1c8ab/BUILD-TOOL-RECEIPT.md>)、[最终指令结构](<C:/Temp/reforgedplay-Dfinal-20261115-1800-52f1c8ab/artifact-structure-02/structure.log>)、4/4真实转化日志，并核对当前Mixin三份源码、client登记、bridge释放关键链、lease发布/清理、Sender许可与Handler同步退出/Quick重建关键段。没有在验收后修改生产实现。最终差异相对HEAD=d4911356b918c8e34d32784ca6436ff8b64c5c43：
+
+| 实现文件 | 实际+/- | 本批职责 |
+| --- | --- | --- |
+| [ReplayFoldersService.java](<src/main/java/com/replaymod/core/files/ReplayFoldersService.java>) | +466/-0 | 仅新增一次设置快照与嵌套资源ZIP租约；流/完整发布/身份凭据/精确清理 |
+| [FullReplaySender.java](<src/main/java/com/replaymod/replay/FullReplaySender.java>) | +367/-95 | producer/queued/actual许可、永久terminal、stream/control代次、合法前向与Quick零时间戳真实重建 |
+| [ReplayHandler.java](<src/main/java/com/replaymod/replay/ReplayHandler.java>) | +75/-15 | 构造失败/Full生命周期归属、同步退出与失败重试、旧overlay自己清理/新owner隔离 |
+| [ReplayResourcePackReleaseBridge.java](<src/main/java/com/replaymod/core/files/ReplayResourcePackReleaseBridge.java>) | 新增662行 | UUID票据/provider/current真实cycle、多raw首close/SEAL/tombstone与异步精确回收 |
+| [Mixin_ServerResourcePackLoaderLease.java](<src/main/java/com/replaymod/core/mixin/Mixin_ServerResourcePackLoaderLease.java>) | 新增110行 | loader实际add/remove/init/provider观察与精确factory |
+| [Mixin_MinecraftResourceReloadLease.java](<src/main/java/com/replaymod/core/mixin/Mixin_MinecraftResourceReloadLease.java>) | 新增62行 | 原F/list identity、实际install/失败/成功正常RETURN关联 |
+| [Mixin_ReplayZipFileLease.java](<src/main/java/com/replaymod/core/mixin/Mixin_ReplayZipFileLease.java>) | 新增43行 | owned-only完整同步open/close接管，foreign仍vanilla |
+| [mixins.core.replaymod.json](<src/main/resources/mixins.core.replaymod.json>) | +3/-0 | 仅三个client登记，旧compatibility/minVersion不变 |
+
+实现合计+1788/-110；本计划另计，不能把普通git diff stat漏掉的四个untracked新Java文件排除。git status正好这八实现文件＋计划，无第九实现；第一批/Image/Setting/依赖/构建/wrapper/实际配置/仓库测试/.env/.vscode没写。当前HEAD未变，无Git写/安装/游戏/whale-craft。
+
+Lead用只读git diff及四份新增文件的no-index diff生成[完整八实现文件真实patch](<C:/Temp/reforgedplay-Lead-final-9031df02/implementation.patch>)，128836B，SHA256=e3c24364419a012037dca17e6a89a516b7bb775636e233ae05adc536ae57e32e；不是手写或只有tracked部分。该patch不含本计划，当前计划以本文件为准；[八文件最终指纹](<C:/Temp/reforgedplay-Lead-final-9031df02/implementation.sha256>)与本次亲跑四源sha256sum一致。保存patch无Git index/commit写操作，no-index差异exit1属正常“有差异”，大于1才是命令错误。
+
+#### 独立执行与最终产物
+
+- 当前实际四生产源码Java21外部编译exit0；C1R22、原33、**完整extra20**、新F3/F5 33全部新执行通过；F1/F2/F4真实正向通过。最强D2原F6输入/断言字节不改，实际sendPacketsTill(1)→(0)生成warmzero、真实旧reader close1、新source opens2→3、restart1→2、decoded2/source1/add2。另全部18个Quick/连接正负例通过，包含control-only/forward/cold0/repeated和restart内部setChannel，不仅是旧包拒绝。
+- 真实C和R都独立执行，public fileKey=null、different-path witnesses生效；正常任务CLOSED、task/anchors零残留，selected root先断言保留再由测试自己的空root善后。已知替换和未知move保留，unsupported能力可使用但零delete；不把“全留存”当正常成功。实际OS symlink因权限不足SKIP，不计通过。
+- 专用mc_gradle task=build、args=["-Djava.io.tmpdir=C:\\Temp","--console=plain"]、timeout1200000：**BUILD SUCCESSFUL in 23s，6 actionable tasks：4 executed、2 up-to-date**；compileJava/jar/shadowJar/remapJar实际执行。test/compileTestJava等NO-SOURCE不当JUnit成功，remapSourcesJar SKIPPED不假签。实际Loom1.7.435/Gradle8.8/Oracle21.0.12.1，原1.21.1/21.1.82/Yarn+patch不变。
+- 构建tool未返回独立exitCode/timedOut字段，未编造；真实daemon buildID=99231680-6a8c-4f57-acae-0f10b91502dd及字节区间/hash有收据。工具渲染节选不是raw wrapper stdout。旧Loom/Gradle/remap诊断仍在；历史Thread.stop/Object.finalize三移除警告本次incremental未重发，未假说新输出/已修。
+- **最终non-dev-shadow [JAR](<build/libs/reforgedplaymod-1.21.1-0.3.1.jar>)**：17,481,807B，SHA256=2a2bc5a1fa4f6a4530edfc904a317197c49240fe51309203d75d09317f4da070。Lead亲跑sha256sum与wc -c再次相符。Jar优先classpath/fresh JVM真实Sponge Mojang四目标4/4转化、三Mixin与receipt嵌套类登记、实际fields/descriptors/F-list槽、成功正常RETURN及ASM23方法＋额外F6方法结构都通过。不是只验旧wrapper/dev-shadow，也不是完整NeoForge launch/JVM linkage证明。
+
+#### 保护、局限与人工停点
+
+- D-final旧证据5024、源码/计划554、非生成workspace1347项，changed/added/removed全空；44个内部进程exit0。外部两次辅助审计因分隔符/重名fingerprint exit1均保留、最终seal audit exit0，没有通过改业务断言消错。D-final无权限字段，未洗掉13.22丢失D3原日志和13.23历史违规；用户可据这些记录独立决定是否接受流程偏差。
+- D-final新保留synthetic samples1,214,545B，C3a以来修复/复验累计31,760,715B＜32MiB，不宣称B/C1/C2/D3所有历史文件都在此数内。未删除旧证据腾预算，类/JAR/logs分列。Lead之后只增加diff/验收记录，不增加合成样本。
+- 身份凭据不足时能使用而保留任务是明确安全降级，不能承诺任意RAMDisk都可自动清完。有效凭据失配不能降级。null-key目录marker布局不是目录inode、权限沙箱或条件原子delete，marker移植/恶意父路径克隆、ID复用和最后check-delete窗口限制完整保留。
+- **实际NeoForge launch-service、全安装模组顺序、完整Quick world/setup、GUI/渲染队列/实际游戏未启动、未验收**；反射首close故障/key-only synthetic provider/Unsafe/MC边界stub不是OS或游戏证明。JNI/Native/Image第二批旧未测问题不顺手修改。后续人工可用合成/可丢弃回放先验pack正常/元数据fallback、Forward/Back/EOF、Quick0往返、退出后立即新回放/渲染队列切换、实际路径/R能力；OS ACL/full disk/卸载卷/共享锁场景不得假签。
+- 本批到此停下：用户先审查这八实现文件＋计划并自行commit，AI不Git add/commit/push/reset/checkout，不安装或复制到模组目录，不自动进入下一批。所有检查完成后Lead将活跃目标标complete使其不再自动继续；目标物理历史记录删除没有公开工具，不能假称已物理删除。
+
+D-final原话：现在不仅旧包进不来，合法的新串流也真实重开并继续到达；绿灯只签已经跑过的那一层。

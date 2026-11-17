@@ -10,6 +10,9 @@
     "Mixin_PostRenderWorldCalback",
     "Mixin_PreRenderHandCallback",
     "Mixin_InjectDynamicResourcePacks",
+    "Mixin_ServerResourcePackLoaderLease",
+    "Mixin_MinecraftResourceReloadLease",
+    "Mixin_ReplayZipFileLease",
     //#endif
     //#if MC>=11400
     "MixinMouse",

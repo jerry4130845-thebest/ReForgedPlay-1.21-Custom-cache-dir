@@ -192,6 +192,17 @@ public class ReplayHandler {
 
     private UUID spectating;
 
+    private volatile boolean ending;
+    // Production stop is irreversible; a failed synchronous file/UI exit is retryable.
+    private boolean endInProgress;
+    private boolean endCompleted;
+    private boolean constructionFailed;
+
+    // Full sender remains the lifetime owner while getReplaySender() exposes QuickSender.
+    boolean ownsFullReplaySender(FullReplaySender sender) {
+        return !ending && fullReplaySender == sender && ReplayModReplay.instance.getReplayHandler() == this;
+    }
+
     public ReplayHandler(ReplayFile replayFile, boolean asyncMode) throws IOException {
         Preconditions.checkState(mc.isOnThread(), "Must be called from Minecraft thread.");
         this.replayFile = replayFile;
@@ -201,24 +212,39 @@ public class ReplayHandler {
         markers = replayFile.getMarkers().or(Collections.emptySet());
 
         fullReplaySender = new FullReplaySender(this, replayFile);
-        //#if MC>=10800
-        quickReplaySender = new QuickReplaySender(ReplayModReplay.instance, replayFile);
-        //#endif
+        try {
+            //#if MC>=10800
+            quickReplaySender = new QuickReplaySender(ReplayModReplay.instance, replayFile);
+            //#endif
 
-        setup();
+            setup(true);
 
-        overlay = new GuiReplayOverlay(this);
-        overlay.setVisible(true);
+            overlay = new GuiReplayOverlay(this);
+            overlay.setVisible(true);
 
-        ReplayOpenedCallback.EVENT.invoker().replayOpened(this);
+            ReplayOpenedCallback.EVENT.invoker().replayOpened(this);
 
-        fullReplaySender.setAsyncMode(asyncMode);
+            fullReplaySender.setAsyncMode(asyncMode);
+        } catch (RuntimeException | Error failure) {
+            constructionFailed = true; // Never retry an exit against a half-initialized handler.
+            ending = true;
+            try { fullReplaySender.terminateReplay(); }
+            catch (RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+            if (channel != null) {
+                try { channel.close(); }
+                catch (RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+            }
+            // No ReplayFile close/save here: construction failure must not rewrite its transaction.
+            throw failure;
+        }
     }
 
     void restartedReplay() {
         Preconditions.checkState(mc.isOnThread(), "Must be called from Minecraft thread.");
+        if (!ownsFullReplaySender(fullReplaySender) || fullReplaySender.isTerminal()) return;
 
         channel.close();
+        if (!ownsFullReplaySender(fullReplaySender) || fullReplaySender.isTerminal()) return;
 
         //#if MC>=11400
         mc.mouse.unlockCursor();
@@ -238,12 +264,19 @@ public class ReplayHandler {
 
         restrictions = new Restrictions();
 
-        setup();
+        setup(false);
     }
 
     public void endReplay() throws IOException {
         Preconditions.checkState(mc.isOnThread(), "Must be called from Minecraft thread.");
-
+        if (constructionFailed || endInProgress || endCompleted) return;
+        endInProgress = true;
+        ending = true;
+        Throwable primary = null;
+        try {
+        // This must precede user callbacks and ReplayFile closure, but must not skip the
+        // separate once-only events/channel cleanup in terminateReplay().
+        fullReplaySender.stopResourceProduction();
         ReplayClosingCallback.EVENT.invoker().replayClosing(this);
 
         fullReplaySender.terminateReplay();
@@ -258,6 +291,9 @@ public class ReplayHandler {
 
         channel.close().awaitUninterruptibly();
 
+        // A closing callback may already have synchronously opened a replacement replay.
+        // Never disconnect or clear that new session on behalf of this old handler.
+        if (ReplayModReplay.instance.getReplayHandler() == this) {
         if (mc.player instanceof CameraEntity) {
             //#if MC<11700
             //#if MC>=11400
@@ -277,23 +313,45 @@ public class ReplayHandler {
             //#endif
         }
 
+        if (ReplayModReplay.instance.getReplayHandler() == this) {
         TimerAccessor timer = (TimerAccessor) ((MinecraftAccessor) mc).getTimer();
         //#if MC>=11200
         timer.setTickLength(DEFAULT_MS_PER_TICK);
         //#else
         //$$ timer.setTimerSpeed(1);
         //#endif
+        }
+        }
+
+        // This handler owns its overlay even if a callback already installed a new replay.
+        // Hiding it can itself reenter user code: recheck global ownership afterwards.
         overlay.setVisible(false);
-
-        ReplayModReplay.instance.forcefullyStopReplay();
-
-        mc.setScreen(null);
+        if (ReplayModReplay.instance.getReplayHandler() == this) {
+            ReplayModReplay.instance.forcefullyStopReplay();
+            if (ReplayModReplay.instance.getReplayHandler() == null) mc.setScreen(null);
+        }
 
         ReplayClosedCallback.EVENT.invoker().replayClosed(this);
+        } catch (IOException | RuntimeException | Error failure) {
+            primary = failure;
+            throw failure;
+        } finally {
+            // Resource-only continuation owns no handler/world/global-state callbacks.
+            try { fullReplaySender.terminateReplay(); }
+            catch (RuntimeException | Error cleanup) {
+                if (primary == null) throw cleanup;
+                if (primary != cleanup) primary.addSuppressed(cleanup);
+            } finally {
+                endInProgress = false;
+            }
+        }
+        // Reached only after both the full synchronous body and final resource cleanup succeeded.
+        endCompleted = true;
     }
 
-    private void setup() {
+    private void setup(boolean initial) {
         Preconditions.checkState(mc.isOnThread(), "Must be called from Minecraft thread.");
+        if (ending || fullReplaySender.isTerminal() || (!initial && !ownsFullReplaySender(fullReplaySender))) return;
 
         //#if MC>=11100
         mc.inGameHud.getChatHud().clear(false);
@@ -480,6 +538,7 @@ public class ReplayHandler {
     }
 
     public void setQuickMode(boolean quickMode) {
+        if (ending || fullReplaySender.isTerminal() || !ownsFullReplaySender(fullReplaySender)) return;
         if (ReplayMod.isMinimalMode()) {
             throw new UnsupportedOperationException("Quick Mode not supported in minimal mode.");
         }
@@ -491,6 +550,7 @@ public class ReplayHandler {
             // be sufficient).
             throw new IllegalStateException("Cannot switch to quick mode while in async mode.");
         }
+        fullReplaySender.advancePacketGeneration();
         this.quickMode = quickMode;
 
         CameraEntity cam = getCameraEntity();
