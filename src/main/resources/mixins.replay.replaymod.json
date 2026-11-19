@@ -10,6 +10,8 @@
     "world_border.Mixin_UseReplayTime_ForMovement",
     "world_border.Mixin_UseReplayTime_ForTexture",
     "Mixin_HandleInputsInReplay",
+    "Mixin_ReplaceDuplicateReplayObjective",
+    "Mixin_IgnoreMismatchedReplayTeamRemoval",
     "Mixin_FixNPCSkinCaching",
     //#if MC>=11900
     "Mixin_AllowExpiredPlayerKeys",

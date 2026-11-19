@@ -344,3 +344,27 @@ replaymod.gui.advancedscreenshots.finished.description.360=You successfully crea
 replaymod.gui.advancedscreenshots.finished.description.veer=Upload and view the image in VR on VeeR.tv or open it on your disk.
 replaymod.gui.advancedscreenshots.finished.upload.veer=Upload to VeeR.tv
 replaymod.gui.advancedscreenshots.finished.showfile=Show file on disk
+
+# Storage settings (local draft, applied together)
+replaymod.gui.storage.title=Storage Settings
+replaymod.gui.storage.apply=Apply
+replaymod.gui.storage.recordingPath=Saved replays (recordingPath)
+replaymod.gui.storage.cachePath=Replay cache (cachePath)
+replaymod.gui.storage.tempPath=Temporary data / natives (tempPath)
+replaymod.gui.storage.rawPath=Original replay backups (rawPath)
+replaymod.gui.storage.recordingWorkPath=Recording work directory (recordingWorkPath)
+replaymod.gui.storage.tmpPath=Uncommitted work directory (tmpPath)
+replaymod.gui.storage.rawBackupEnabled=Keep raw backups (default: On)
+replaymod.gui.storage.ephemeralCache=Delete rebuildable cache after last user (default: Off)
+replaymod.gui.storage.hint.paths=Blank = inherit/default. Relative paths use the game directory. Scroll for all options; Tab/Enter moves between paths, never applies.
+replaymod.gui.storage.hint.tasks=Changes affect new tasks only. Existing data is not moved or deleted. Apply submits all eight values together; Cancel/Esc discards an unapplied draft.
+replaymod.gui.storage.hint.native=Once natives initialize, their location stays fixed for this process. Restart Minecraft to use a different native root.
+replaymod.gui.storage.hint.ramdisk=RAMDisk contents disappear on power loss. Keep saved replays, backups and unsaved/recovery work on persistent storage when possible.
+replaymod.gui.storage.hint.raw=Turning raw backups off keeps the configured path and historical backups. Failed tasks still retain recovery materials; this switch does not make them disposable.
+replaymod.gui.storage.invalidType=Invalid or unregistered setting: %s. Check the draft before applying.
+replaymod.gui.storage.validating=Checking paths in the background... Cancel/Esc still discards this draft.
+replaymod.gui.storage.invalid=Not applied. Check the paths: %s
+replaymod.gui.storage.applied=Applied in memory for new tasks; configuration save requested. Disk write failures are only logged by the existing settings backend.
+replaymod.gui.storage.callbackFailed=Changed values were updated and save was requested, but a settings callback failed: %s. Reopen to inspect; disk persistence is not confirmed.
+replaymod.gui.storage.updateUncertain=The update raised an error; settings may already have changed. No save was requested. Close and reopen to inspect before retrying: %s
+replaymod.gui.storage.saveFailed=The batch was applied in memory, but the save call raised an error: %s. Disk persistence is not confirmed.

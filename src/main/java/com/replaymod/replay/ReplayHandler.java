@@ -193,10 +193,18 @@ public class ReplayHandler {
     private UUID spectating;
 
     private volatile boolean ending;
-    // Production stop is irreversible; a failed synchronous file/UI exit is retryable.
+    // Production stop is irreversible; retries finish cleanup, never resave after close was requested.
     private boolean endInProgress;
-    private boolean endCompleted;
+    private boolean endCompleted; // Logical exit only, NOT a ReplayFile release receipt.
     private boolean constructionFailed;
+    private boolean closingCallbackAttempted;
+    private boolean closedCallbackAttempted;
+    private boolean saveAttempted;
+    private boolean fileCloseRequested;
+    private boolean quickUnregistered;
+    private Throwable endFailure;
+    private Throwable firstTerminateCleanupFailure;
+    private Throwable firstCloseRequestFailure;
 
     // Full sender remains the lifetime owner while getReplaySender() exposes QuickSender.
     boolean ownsFullReplaySender(FullReplaySender sender) {
@@ -269,27 +277,42 @@ public class ReplayHandler {
 
     public void endReplay() throws IOException {
         Preconditions.checkState(mc.isOnThread(), "Must be called from Minecraft thread.");
-        if (constructionFailed || endInProgress || endCompleted) return;
+        if (constructionFailed || endInProgress) return;
+        if (endCompleted) {
+            // Logical completion does not suppress a failed/pending actor startup or release retry.
+            fullReplaySender.requestReplayFileClose(endFailure);
+            return;
+        }
         endInProgress = true;
         ending = true;
         Throwable primary = null;
+        boolean logicalExitFinished = false;
         try {
         // This must precede user callbacks and ReplayFile closure, but must not skip the
         // separate once-only events/channel cleanup in terminateReplay().
         fullReplaySender.stopResourceProduction();
-        ReplayClosingCallback.EVENT.invoker().replayClosing(this);
+        if (!closingCallbackAttempted && !fileCloseRequested) {
+            closingCallbackAttempted = true; // Reentrancy/failure must not replay the event group.
+            ReplayClosingCallback.EVENT.invoker().replayClosing(this);
+        }
 
         fullReplaySender.terminateReplay();
         //#if MC>=10800
-        if (quickMode) {
+        if (quickMode && !quickUnregistered) {
             quickReplaySender.unregister();
+            quickUnregistered = true; // Only successful unregister counts as done.
         }
         //#endif
 
-        replayFile.save();
-        replayFile.close();
+        if (!saveAttempted && !fileCloseRequested) {
+            saveAttempted = true;
+            // Retain the existing synchronous save/edit contract (this I/O may still block).
+            replayFile.save();
+        }
+        fileCloseRequested = true;
+        fullReplaySender.requestReplayFileClose(endFailure);
 
-        channel.close().awaitUninterruptibly();
+        if (channel != null) channel.close(); // Local request, never wait for the reader on MC.
 
         // A closing callback may already have synchronously opened a replacement replay.
         // Never disconnect or clear that new session on behalf of this old handler.
@@ -331,22 +354,46 @@ public class ReplayHandler {
             if (ReplayModReplay.instance.getReplayHandler() == null) mc.setScreen(null);
         }
 
-        ReplayClosedCallback.EVENT.invoker().replayClosed(this);
+        if (!closedCallbackAttempted) {
+            closedCallbackAttempted = true;
+            ReplayClosedCallback.EVENT.invoker().replayClosed(this);
+        }
+        logicalExitFinished = true;
         } catch (IOException | RuntimeException | Error failure) {
-            primary = failure;
-            throw failure;
+            primary = rememberEndFailure(failure);
         } finally {
-            // Resource-only continuation owns no handler/world/global-state callbacks.
+            // Independent resource-only attempts: even terminate failure must not skip file close.
             try { fullReplaySender.terminateReplay(); }
             catch (RuntimeException | Error cleanup) {
-                if (primary == null) throw cleanup;
-                if (primary != cleanup) primary.addSuppressed(cleanup);
+                if (firstTerminateCleanupFailure == null) firstTerminateCleanupFailure = cleanup;
+                primary = rememberEndFailure(firstTerminateCleanupFailure);
+            }
+            try {
+                fileCloseRequested = true;
+                fullReplaySender.requestReplayFileClose(endFailure);
+            } catch (RuntimeException | Error cleanup) {
+                if (firstCloseRequestFailure == null) firstCloseRequestFailure = cleanup;
+                primary = rememberEndFailure(firstCloseRequestFailure);
             } finally {
                 endInProgress = false;
             }
         }
-        // Reached only after both the full synchronous body and final resource cleanup succeeded.
-        endCompleted = true;
+        if (logicalExitFinished && primary == null) endCompleted = true;
+        if (primary instanceof IOException failure) throw failure;
+        if (primary instanceof RuntimeException failure) throw failure;
+        if (primary instanceof Error failure) throw failure;
+    }
+
+    private Throwable rememberEndFailure(Throwable failure) {
+        if (endFailure == null) endFailure = failure;
+        else if (endFailure != failure) {
+            synchronized (endFailure) {
+                boolean present = false;
+                for (Throwable suppressed : endFailure.getSuppressed()) if (suppressed == failure) present = true;
+                if (!present) endFailure.addSuppressed(failure);
+            }
+        }
+        return endFailure;
     }
 
     private void setup(boolean initial) {

@@ -3,6 +3,7 @@ package com.replaymod.replay;
 import com.github.steveice10.packetlib.io.NetOutput;
 import com.github.steveice10.packetlib.tcp.io.ByteBufNetOutput;
 import com.google.common.base.Preconditions;
+import com.replaymod.core.files.ManagedReplayFile;
 import com.replaymod.core.files.ReplayFoldersService.ResourcePackLease;
 import com.replaymod.core.files.ReplayResourcePackReleaseBridge;
 import com.replaymod.core.ReplayMod;
@@ -124,8 +125,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -192,7 +196,7 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
     /**
      * Timestamp of the last packet sent in milliseconds since the start.
      */
-    protected int lastTimeStamp;
+    protected volatile int lastTimeStamp;
 
     /**
      * @see #currentTimeStamp()
@@ -214,6 +218,22 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
      * When accessing this stream make sure to synchronize on {@code this} as it's used from multiple threads.
      */
     protected ReplayInputStream replayIn;
+    // Guarded by this: a failed retirement must never be read again or overwritten.
+    private boolean replayInputClosePending;
+
+    // Short request/diagnostic lock only. Never acquire this sender's monitor while holding it.
+    private final Object packetCloseStateLock = new Object();
+    private Thread packetCloser;
+    private long packetCloseRequestSequence;
+    private boolean packetInputCloseRequested;
+    private boolean packetInputCloseCompleted;
+    private boolean replayFileCloseRequested;
+    private boolean replayRecoveryIntentRegistered;
+    // For ManagedReplayFile this is a real release receipt; otherwise only close() returned.
+    private boolean replayFileCloseCompleted;
+    private Throwable closePrimary;
+    private Throwable firstPacketCloseFailure;
+    private Throwable firstFileCloseFailure;
 
     /**
      * The next packet that should be sent.
@@ -283,7 +303,12 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
     private volatile Thread asyncWorker;
     // A forward rush supersedes UI/control intentions, not the current stream's legal packets.
     private final AtomicLong controlEpoch = new AtomicLong();
+    // Reader/EOF provenance, or the generation of the established LOGIN boundary before first open.
     private long replayInGeneration;
+    // NONE permits a fresh reader only if there is no outstanding restart and the boundary is current.
+    private enum EofState { NONE, NEEDS_PAUSE, PAUSED, RESUME }
+    // Written under modeLock. Closing the reader does not clear its EOF history.
+    private volatile EofState eofState = EofState.NONE;
     // Carry the generation captured when bytes were read through synchronous Netty decoding.
     // A seek while an async packet is sleeping must not give that old resource request a new epoch.
     private final ThreadLocal<Long> dispatchGeneration = new ThreadLocal<>();
@@ -299,6 +324,7 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
         this.replayFile = file;
         this.replayLength = file.getMetaData().getDuration();
         this.resourcePackLease = ReplayMod.instance.folders.createResourcePackLease();
+        this.replayInGeneration = resourcePackLease.generation();
         try {
             ReplayResourcePackReleaseBridge.attach(resourcePackLease, mc);
             events.register();
@@ -351,8 +377,9 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
         setAsyncMode(false);
         // Preserve this explicit mode-switch wait, but service runSync callbacks rather than
         // blocking the client on the sender monitor. Final termination never waits here.
-        while (worker != null && worker.isAlive()) {
+        while (!terminal.get() && worker != null && worker.isAlive()) {
             executeTaskQueue();
+            if (terminal.get()) return;
             try { Thread.sleep(0, 100_000); }
             catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
@@ -369,7 +396,7 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
      */
     @Override
     public int currentTimeStamp() {
-        if (asyncMode && !paused()) {
+        if (asyncMode && eofState == EofState.NONE && !paused()) {
             return (int) ((System.currentTimeMillis() - realTimeStart) * realTimeStartSpeed);
         } else {
             return lastTimeStamp;
@@ -400,6 +427,9 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
         } finally {
             try { ReplayResourcePackReleaseBridge.requestRelease(resourcePackLease); }
             catch (RuntimeException | Error e) { failure = collectFailure(failure, e); }
+            // Separate from terminationCleaned: a failed close/start remains retryable.
+            try { requestPacketInputClose(); }
+            catch (RuntimeException | Error e) { failure = collectFailure(failure, e); }
         }
         if (failure instanceof Error error) throw error;
         if (failure instanceof RuntimeException error) throw error;
@@ -429,8 +459,181 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
 
     private static Throwable collectFailure(Throwable primary, Throwable next) {
         if (primary == null) return next;
-        if (primary != next) primary.addSuppressed(next);
+        suppressOnce(primary, next);
         return primary;
+    }
+
+    /** Caller holds this; only a successful real close retires the reference. */
+    private void closeReplayInputLocked() throws IOException {
+        if (replayIn == null) return;
+        replayInputClosePending = true;
+        try {
+            replayIn.close();
+            replayIn = null;
+            replayInputClosePending = false;
+        } catch (IOException | RuntimeException | Error failure) {
+            synchronized (packetCloseStateLock) { recordCloseFailureLocked(false, failure); }
+            throw failure;
+        }
+    }
+
+    /** Retire only the failed reader while still inside its own monitor acquisition. */
+    private void retireFailedReplayInputLocked(Throwable primary) {
+        restartPending = true;
+        nextPacket = null;
+        if (replayInputClosePending) return; // Do not spin/retry a just-failed close in the same read.
+        try { closeReplayInputLocked(); }
+        catch (IOException | RuntimeException | Error cleanup) { suppressOnce(primary, cleanup); }
+    }
+
+    private static void suppressOnce(Throwable primary, Throwable cleanup) {
+        if (primary == null || cleanup == null || primary == cleanup) return;
+        synchronized (primary) {
+            for (Throwable existing : primary.getSuppressed()) if (existing == cleanup) return;
+            primary.addSuppressed(cleanup);
+        }
+    }
+
+    // Called only under packetCloseStateLock. Retain one failure per stage, not an unbounded chain.
+    private void recordCloseFailureLocked(boolean file, Throwable failure) {
+        if (file) {
+            if (firstFileCloseFailure == null) firstFileCloseFailure = failure;
+            suppressOnce(closePrimary, firstFileCloseFailure);
+        } else {
+            if (firstPacketCloseFailure == null) firstPacketCloseFailure = failure;
+            suppressOnce(closePrimary, firstPacketCloseFailure);
+        }
+    }
+
+    private void requestPacketInputClose() {
+        requestClose(false, null);
+    }
+
+    /** Exit-only request from our Handler, never a synchronous release receipt. */
+    void requestReplayFileClose(Throwable primary) {
+        requestClose(true, primary);
+    }
+
+    private void requestClose(boolean file, Throwable primary) {
+        try {
+            synchronized (packetCloseStateLock) {
+                if (primary != null) {
+                    if (closePrimary == null) closePrimary = primary;
+                    else suppressOnce(closePrimary, primary);
+                    suppressOnce(closePrimary, firstPacketCloseFailure);
+                    suppressOnce(closePrimary, firstFileCloseFailure);
+                }
+                ++packetCloseRequestSequence;
+                packetInputCloseRequested = true;
+                replayFileCloseRequested |= file;
+                packetCloseStateLock.notifyAll();
+                if (packetInputCloseCompleted && (!replayFileCloseRequested || replayFileCloseCompleted)) return;
+                if (packetCloser == null || !packetCloser.isAlive()) {
+                    // Keep even a failed-to-start thread reachable; a later request may retry startup.
+                    packetCloser = new Thread(this::runPacketCloseWorker, "replaymod-packet-input-close");
+                    packetCloser.setDaemon(true);
+                    packetCloser.start();
+                }
+            }
+        } catch (RuntimeException | Error failure) {
+            synchronized (packetCloseStateLock) { recordCloseFailureLocked(false, failure); }
+            ReplayModReplay.LOGGER.error("Replay packet/file close worker startup failed; request retained, retry required", failure);
+            throw failure;
+        }
+    }
+
+    private void runPacketCloseWorker() {
+        long delayMillis = 1000;
+        while (true) {
+            long sequence;
+            boolean closeInput;
+            boolean closeFile;
+            boolean preserveRecovery;
+            Throwable primary;
+            synchronized (packetCloseStateLock) {
+                sequence = packetCloseRequestSequence;
+                closeInput = packetInputCloseRequested && !packetInputCloseCompleted;
+                closeFile = replayFileCloseRequested && !replayFileCloseCompleted;
+                primary = closePrimary;
+                preserveRecovery = primary != null && !replayRecoveryIntentRegistered;
+            }
+            boolean inputCompleted = !closeInput;
+            boolean fileCompleted = !closeFile;
+            Throwable packetFailure = null;
+            Throwable fileFailure = null;
+            if (closeInput) {
+                try {
+                    // The actual reader barrier: no modeLock or short state lock is held here.
+                    synchronized (this) {
+                        nextPacket = null; // Terminal admission is already closed.
+                        closeReplayInputLocked();
+                    }
+                    inputCompleted = true;
+                } catch (IOException | RuntimeException | Error failure) { packetFailure = failure; }
+            }
+            if (closeFile) {
+                try {
+                    // Even a failed packet retirement must request adapter closing. No sender lock here.
+                    if (replayFile instanceof ManagedReplayFile managed && preserveRecovery) {
+                        managed.preserveRecovery(primary);
+                        // Register the intent once: the adapter may append a failed record-write note.
+                        // Repeating this on every close retry could grow primary.suppressed forever.
+                        synchronized (packetCloseStateLock) { replayRecoveryIntentRegistered = true; }
+                    }
+                    replayFile.close();
+                    fileCompleted = !(replayFile instanceof ManagedReplayFile managed) || managed.isReleased();
+                } catch (IOException | RuntimeException | Error failure) { fileFailure = failure; }
+            }
+            synchronized (packetCloseStateLock) {
+                if (inputCompleted) packetInputCloseCompleted = true;
+                if (fileCompleted && closeFile) replayFileCloseCompleted = true;
+                if (packetFailure != null) recordCloseFailureLocked(false, packetFailure);
+                if (fileFailure != null) recordCloseFailureLocked(true, fileFailure);
+                primary = closePrimary;
+            }
+            // Real diagnostics outside both locks; a recovery location is not proof protection succeeded.
+            String recovery = null;
+            if (packetFailure != null || fileFailure != null || (closeFile && !fileCompleted)) {
+                recovery = closeRecoveryDescription();
+            }
+            if (packetFailure != null) ReplayModReplay.LOGGER.error(
+                    "Replay packet close failed; retrying; recovery=" + recovery + "; business primary=" + primary, packetFailure);
+            if (fileFailure != null) ReplayModReplay.LOGGER.error(
+                    "Replay file close incomplete; retrying without discarding owner; recovery=" + recovery
+                            + "; business primary=" + primary, fileFailure);
+            if (closeFile && fileFailure == null && !fileCompleted) ReplayModReplay.LOGGER.warn(
+                    "Replay file close pending actual Managed release; retrying; recovery=" + recovery
+                            + "; business primary=" + primary);
+            synchronized (packetCloseStateLock) {
+                // Publishing requests and relinquishing responsibility use the same linearization lock.
+                if (sequence != packetCloseRequestSequence) {
+                    delayMillis = 1000;
+                    continue;
+                }
+                if (packetInputCloseCompleted && (!replayFileCloseRequested || replayFileCloseCompleted)) {
+                    packetCloser = null;
+                    return;
+                }
+                long deadline = System.nanoTime() + delayMillis * 1_000_000L;
+                while (sequence == packetCloseRequestSequence) {
+                    long remaining = deadline - System.nanoTime();
+                    if (remaining <= 0) break;
+                    try {
+                        packetCloseStateLock.wait(remaining / 1_000_000L, (int) (remaining % 1_000_000L));
+                    } catch (InterruptedException ignored) {
+                        // This daemon owns retry responsibility; interrupt is not a release receipt.
+                        break;
+                    }
+                }
+            }
+            delayMillis = Math.min(30_000, delayMillis * 2);
+        }
+    }
+
+    private String closeRecoveryDescription() {
+        if (!(replayFile instanceof ManagedReplayFile managed)) return "non-Managed (close return only)";
+        try { return String.valueOf(managed.recoveryRecord()); }
+        catch (IOException | RuntimeException | Error failure) { return "unavailable: " + failure; }
     }
 
     private class EventHandler extends EventRegistrations {
@@ -1025,17 +1228,31 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
      */
     @Override
     public void setReplaySpeed(final double d) {
-        if (d != 0) {
-            this.replaySpeed = d;
-            this.realTimeStartSpeed = d;
-            this.realTimeStart = System.currentTimeMillis() - (long) (lastTimeStamp / d);
+        synchronized (modeLock) {
+            if (terminal.get()) return;
+            if (d != 0) {
+                this.replaySpeed = d;
+                this.realTimeStartSpeed = d;
+                this.realTimeStart = System.currentTimeMillis() - (long) (lastTimeStamp / d);
+            }
+            TimerAccessor timer = (TimerAccessor) ((MinecraftAccessor) mc).getTimer();
+            //#if MC>=11200
+            timer.setTickLength(DEFAULT_MS_PER_TICK / (float) d);
+            //#else
+            //$$ timer.setTimerSpeed((float) d);
+            //#endif
+            if (eofState != EofState.NONE) {
+                eofState = d > 0 ? EofState.RESUME : EofState.PAUSED;
+            }
         }
-        TimerAccessor timer = (TimerAccessor) ((MinecraftAccessor) mc).getTimer();
-        //#if MC>=11200
-        timer.setTickLength(DEFAULT_MS_PER_TICK / (float) d);
-        //#else
-        //$$ timer.setTimerSpeed((float) d);
-        //#endif
+    }
+
+    @Override
+    public boolean paused() {
+        EofState state = eofState;
+        // The overlay must offer Play even if the client has not processed the EOF pause yet.
+        return (asyncMode && (state == EofState.NEEDS_PAUSE || state == EofState.PAUSED))
+                || ReplaySender.super.paused();
     }
 
     /////////////////////////////////////////////////////////
@@ -1074,11 +1291,18 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                 REPLAY_LOOP:
                 while (!asyncStopped(workerEpoch)) {
                     synchronized (FullReplaySender.this) {
+                        try {
                         if (asyncStopped(workerEpoch)) return;
-                        if (replayIn == null) {
-                            replayInGeneration = resourcePackLease.generation();
-                            replayIn = replayFile.getPacketData(getPacketTypeRegistry(State.LOGIN));
+                        checkInputGenerationLocked();
+                        if (eofState != EofState.NONE && !awaitEofRestartLocked(workerEpoch)) break;
+                        if (startFromBeginning || restartPending || eofState != EofState.NONE) {
+                            if (!restartInputLocked(workerEpoch, true) && !asyncStopped(workerEpoch)) {
+                                Thread.sleep(replayInputClosePending ? 1000 : 100);
+                            }
+                            continue;
                         }
+                        if (asyncStopped(workerEpoch)) return;
+                        if (!openReplayInputLocked()) continue;
                         // Packet loop
                         while (true) {
                             try {
@@ -1153,59 +1377,35 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                                     }
                                 }
                                 if (completedIntention != -1) {
-                                    long intention = completedIntention;
-                                    dispatchPacketHandler(guardPacketCallback(() -> {
-                                        if (controlEpoch.get() == intention) replayHandler.moveCameraToTargetPosition();
-                                    }));
+                                    moveCameraAfterHurry(completedIntention);
                                     // Do not recapture a newer jump's intention after queuing the camera callback.
-                                    pauseAsync(workerEpoch, intention);
+                                    pauseAsync(workerEpoch, completedIntention);
                                 }
                             } catch (EOFException eof) {
-                                // Reached end of file
-                                // Pause the replay which will cause it to freeze before getting restarted
-                                if (asyncStopped(workerEpoch)) break REPLAY_LOOP;
-                                pauseAsync(workerEpoch);
-                                // Then wait until the user tells us to continue
-                                while (paused() && hasWorldLoaded && desiredTimeStamp == -1 && !asyncStopped(workerEpoch)) {
-                                    Thread.sleep(10);
-                                }
-
-                                if (asyncStopped(workerEpoch)) {
-                                    break REPLAY_LOOP;
-                                }
+                                markEofLocked();
+                                tryCloseEofInputLocked();
                                 break;
-                            } catch (IOException e) {
-                                if (asyncStopped(workerEpoch)) break REPLAY_LOOP;
-                                e.printStackTrace();
                             }
                         }
-
-                        if (asyncStopped(workerEpoch)) break REPLAY_LOOP;
-                        // Restart the replay.
-                        restartPending = true;
-                        hasWorldLoaded = false;
-                        inBundle = false;
-                        lastTimeStamp = 0;
-                        registry = getPacketTypeRegistry(State.LOGIN);
-                        startFromBeginning = false;
-                        nextPacket = null;
-                        realTimeStart = System.currentTimeMillis();
-                        if (replayIn != null) {
-                            replayIn.close();
-                            replayIn = null;
+                        } catch (Exception | Error failure) {
+                            // A superseded/mode-switched worker must not retire the handoff stream.
+                            if (!(failure instanceof InterruptedException && asyncStopped(workerEpoch))) {
+                                retireFailedReplayInputLocked(failure);
+                            }
+                            throw failure;
                         }
-                        AtomicBoolean superseded = new AtomicBoolean();
-                        if (!restartReplay(workerEpoch, superseded)) {
-                            startFromBeginning = true;
-                            // A new target superseded only this control intent, not the live worker.
-                            if (superseded.get() && !asyncStopped(workerEpoch)) continue REPLAY_LOOP;
-                            return;
-                        }
-                        restartPending = false;
                     }
                 }
             } catch (Exception e) {
-                if (!asyncStopped(workerEpoch)) e.printStackTrace();
+                if (!(e instanceof InterruptedException && asyncStopped(workerEpoch))) {
+                    ReplayModReplay.LOGGER.error("Replay async reader stopped; retirement pending if close failed", e);
+                }
+            } catch (Error e) {
+                ReplayModReplay.LOGGER.error("Replay async reader failed; retirement pending if close failed", e);
+                throw e;
+            } finally {
+                // Ordinary mode/epoch handoff keeps legal prefetch and its stream untouched.
+                if (terminal.get()) requestPacketInputClose();
             }
     }
 
@@ -1301,20 +1501,27 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
         long generation = resourcePackLease.generation();
         long intention = controlEpoch.get();
         long workerEpoch = asyncEpoch;
+        try {
         syncSender.submit(() -> {
             try {
                 if (!terminal.get() && !asyncMode && asyncEpoch == workerEpoch
                         && controlEpoch.get() == intention && resourcePackLease.generation() == generation) {
-                    doSendPacketsTill(timestamp);
+                    doSendPacketsTill(timestamp, workerEpoch);
                 }
             } finally {
                 doneSending.set(true);
             }
         });
+        } catch (RejectedExecutionException rejected) {
+            if (terminal.get()) return;
+            throw rejected;
+        }
 
         // Drain the task queue while we are sending (in case a mod blocks the io thread waiting for the main thread)
         while (!doneSending.get()) {
+            if (terminal.get()) return;
             executeTaskQueue();
+            if (terminal.get()) return;
 
             // Wait until the sender thread has made progress
             try {
@@ -1326,48 +1533,35 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
             }
         }
 
-        // Everything has been sent, drain the queue one last time
-        executeTaskQueue();
+        // Everything has been sent, drain the queue one last time unless the session ended.
+        if (!terminal.get()) executeTaskQueue();
     }
 
-    private void doSendPacketsTill(int timestamp) {
+    private void doSendPacketsTill(int timestamp, long workerEpoch) {
         try {
             synchronized (this) {
-                if (terminal.get()) return;
-                // Equal time is only a no-op while any existing stream work is still current.
-                // Quick/connection boundaries retire readers and prefetch alike; reopen through
-                // the normal restart path, never relabel bytes already read in an older generation.
-                long generation = resourcePackLease.generation();
-                if ((replayIn != null && replayInGeneration != generation)
-                        || (nextPacket != null && nextPacket.generation != generation)) {
-                    restartPending = true;
-                }
-                if (timestamp == lastTimeStamp && !restartPending) { // Do nothing if we're already there
+                try {
+                if (!restartOwnerCurrent(workerEpoch, false)) return;
+                checkInputGenerationLocked();
+                if (!restartPending && eofState != EofState.NONE && timestamp >= lastTimeStamp) {
+                    // A sync query at/after the end keeps the last frame and the requested clock.
+                    updateSyncClock(timestamp);
+                    tryCloseEofInputLocked();
                     return;
                 }
-                if (restartPending || timestamp < lastTimeStamp) { // Restart the replay if we need to go backwards in time
-                    hasWorldLoaded = false;
-                    inBundle = false;
-                    lastTimeStamp = 0;
-                    if (replayIn != null) {
-                        replayIn.close();
-                        replayIn = null;
-                    }
-                    registry = getPacketTypeRegistry(State.LOGIN);
-                    startFromBeginning = false;
-                    nextPacket = null;
+                if (timestamp == lastTimeStamp && !restartPending) return;
+                if (restartPending || timestamp < lastTimeStamp) {
                     restartPending = true;
-                    if (!restartReplay(-1)) {
-                        startFromBeginning = true;
-                        return;
-                    }
-                    restartPending = false;
+                    if (!restartInputLocked(workerEpoch, false)) return;
                 }
 
-                if (replayIn == null) {
-                    replayInGeneration = resourcePackLease.generation();
-                    replayIn = replayFile.getPacketData(getPacketTypeRegistry(State.LOGIN));
+                synchronized (modeLock) {
+                    if (!restartOwnerCurrent(workerEpoch, false)) return;
+                    // Sync's first genuine read already uses Handler.setup's LOGIN channel.
+                    // A later ordinary async handoff must not mistake it for bootstrap.
+                    startFromBeginning = false;
                 }
+                if (!openReplayInputLocked()) return;
 
                 while (!terminal.get()) { // Send packets
                     try {
@@ -1405,21 +1599,26 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
                         }
                         //#endif
                     } catch (EOFException eof) {
-                        // Shit! We hit the end before finishing our job! What shall we do now?
-                        // well, let's just pretend we're done...
-                        replayIn = null;
-                        break;
-                    } catch (IOException e) {
-                        e.printStackTrace();
+                        updateSyncClock(timestamp);
+                        markEofLocked();
+                        tryCloseEofInputLocked();
+                        return;
                     }
                 }
 
-                // This might be required if we change to async mode anytime soon
-                realTimeStart = System.currentTimeMillis() - (long) (timestamp / replaySpeed);
-                lastTimeStamp = timestamp;
+                updateSyncClock(timestamp);
+                } catch (Exception | Error failure) {
+                    if (!(failure instanceof InterruptedException && terminal.get())) {
+                        retireFailedReplayInputLocked(failure);
+                    }
+                    throw failure;
+                }
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            ReplayModReplay.LOGGER.error("Replay sync reader stopped; retirement pending if close failed", e);
+        } catch (Error e) {
+            ReplayModReplay.LOGGER.error("Replay sync reader failed; retirement pending if close failed", e);
+            throw e;
         }
     }
 
@@ -1540,8 +1739,91 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
         dispatchPacketHandler(guardControlCallback(runnable));
     }
 
-    private void pauseAsync(long workerEpoch) throws Exception {
-        pauseAsync(workerEpoch, controlEpoch.get());
+    private void updateSyncClock(int timestamp) {
+        realTimeStart = System.currentTimeMillis() - (long) (timestamp / replaySpeed);
+        lastTimeStamp = timestamp;
+    }
+
+    private void checkInputGenerationLocked() {
+        long generation = resourcePackLease.generation();
+        // Check EOF and a not-yet-opened boundary too, not only non-null reader/prefetch.
+        if (replayInGeneration != generation || (nextPacket != null && nextPacket.generation != generation)) {
+            restartPending = true;
+        }
+    }
+
+    private boolean openReplayInputLocked() throws IOException {
+        checkInputGenerationLocked();
+        if (terminal.get() || restartPending || startFromBeginning || eofState != EofState.NONE) return false;
+        if (replayIn == null) replayIn = replayFile.getPacketData(getPacketTypeRegistry(State.LOGIN));
+        return true;
+    }
+
+    private void markEofLocked() {
+        nextPacket = null;
+        synchronized (modeLock) {
+            eofState = ReplaySender.super.paused() ? EofState.PAUSED : EofState.NEEDS_PAUSE;
+        }
+    }
+
+    private boolean tryCloseEofInputLocked() {
+        try {
+            closeReplayInputLocked();
+            return true;
+        } catch (IOException | RuntimeException failure) {
+            // Keep the exhausted reference/pending bit. Only close may be retried, never read.
+            ReplayModReplay.LOGGER.error("Replay EOF reader close failed; retirement remains pending", failure);
+            return false;
+        }
+    }
+
+    private boolean awaitEofRestartLocked(long workerEpoch) throws InterruptedException {
+        while (!asyncStopped(workerEpoch)) {
+            long completedIntention = -1;
+            boolean restart;
+            synchronized (modeLock) {
+                if (asyncStopped(workerEpoch)) return false;
+                // An explicit backward request owns both its desired time and the restart bit.
+                if (!startFromBeginning && !restartPending && isHurrying()) {
+                    desiredTimeStamp = -1;
+                    completedIntention = controlEpoch.get();
+                }
+                restart = startFromBeginning || restartPending || eofState == EofState.RESUME;
+            }
+            if (completedIntention != -1) moveCameraAfterHurry(completedIntention);
+            if (restart) return true;
+            if (eofState == EofState.NEEDS_PAUSE) pauseAtEof(workerEpoch);
+            Thread.sleep(10);
+            checkInputGenerationLocked();
+        }
+        return false;
+    }
+
+    private void moveCameraAfterHurry(long intention) {
+        dispatchPacketHandler(guardPacketCallback(() -> {
+            if (controlEpoch.get() == intention) replayHandler.moveCameraToTargetPosition();
+        }));
+    }
+
+    private void pauseAtEof(long workerEpoch) throws InterruptedException {
+        long intention = controlEpoch.get();
+        AtomicBoolean ticket = new AtomicBoolean(true);
+        try {
+            ReplayMod.instance.runSync(guardPacketCallback(() -> {
+                synchronized (modeLock) {
+                    if (!asyncStopped(workerEpoch) && controlEpoch.get() == intention
+                            && eofState == EofState.NEEDS_PAUSE && !startFromBeginning && !restartPending
+                            && ticket.compareAndSet(true, false)) {
+                        setReplaySpeed(0);
+                    }
+                }
+            }));
+        } catch (ExecutionException | TimeoutException failure) {
+            ticket.set(false);
+            ReplayModReplay.LOGGER.error("Replay EOF pause did not complete; old callback retired", failure);
+        } finally {
+            ticket.set(false); // runSync does not cancel queued work on timeout/interruption.
+        }
     }
 
     private void pauseAsync(long workerEpoch, long intention) throws Exception {
@@ -1550,33 +1832,86 @@ public class FullReplaySender extends ChannelInboundHandlerAdapter implements Re
         }));
     }
 
-    /** Restart is a packet/connection boundary, never the end of the task. */
-    private boolean restartReplay(long workerEpoch) throws Exception {
-        return restartReplay(workerEpoch, null);
+    private boolean restartOwnerCurrent(long workerEpoch, boolean async) {
+        return !terminal.get() && asyncEpoch == workerEpoch && asyncMode == async;
     }
 
-    private boolean restartReplay(long workerEpoch, AtomicBoolean superseded) throws Exception {
-        if (terminal.get()) return false;
-        advancePacketGeneration();
-        long generation = resourcePackLease.generation();
-        long intention = controlEpoch.get();
+    /** Both senders require successful Handler.setup before opening a new LOGIN reader. Caller holds this. */
+    private boolean restartInputLocked(long workerEpoch, boolean async) throws IOException, InterruptedException {
+        if (!restartOwnerCurrent(workerEpoch, async)) return false;
+        if (eofState != EofState.NONE) {
+            if (!tryCloseEofInputLocked()) return false;
+        } else {
+            closeReplayInputLocked();
+        }
+
+        final long intention;
+        final long generation;
+        final boolean resumeOnly;
+        synchronized (modeLock) {
+            if (!restartOwnerCurrent(workerEpoch, async)) return false;
+            checkInputGenerationLocked();
+            resumeOnly = !startFromBeginning && !restartPending;
+            if (resumeOnly && eofState != EofState.RESUME) return false;
+            if (!resumeOnly) restartPending = true;
+            startFromBeginning = false;
+            nextPacket = null;
+            intention = controlEpoch.get();
+            generation = resourcePackLease.generation();
+        }
+
+        long newGeneration = restartReplay(workerEpoch, async, generation, intention, resumeOnly);
+        synchronized (modeLock) {
+            if (newGeneration < 0 || terminal.get()) return false;
+            // Preserve any new backward request published while the client callback was running.
+            hasWorldLoaded = false;
+            inBundle = false;
+            lastTimeStamp = 0;
+            realTimeStart = System.currentTimeMillis();
+            registry = getPacketTypeRegistry(State.LOGIN);
+            replayInGeneration = newGeneration;
+            restartPending = false;
+            eofState = EofState.NONE;
+        }
+        return true;
+    }
+
+    private long restartReplay(long workerEpoch, boolean async, long generation, long intention, boolean resumeOnly)
+            throws InterruptedException {
         ServerResourcePackLoader loader = mc.getServerResourcePackProvider();
         long connectionEpoch = ReplayResourcePackReleaseBridge.connectionEpoch(loader);
-        AtomicBoolean restarted = new AtomicBoolean();
-        ReplayMod.instance.runSync(() -> {
-            if (controlEpoch.get() == intention && callbackCurrent(generation, loader, connectionEpoch)
-                    && (workerEpoch < 0 || !asyncStopped(workerEpoch))) {
+        AtomicBoolean ticket = new AtomicBoolean(true);
+        AtomicLong restartedGeneration = new AtomicLong(-1);
+        try {
+            ReplayMod.instance.runSync(() -> {
+                Channel previous;
+                synchronized (modeLock) {
+                    if (!restartOwnerCurrent(workerEpoch, async) || controlEpoch.get() != intention
+                            || !callbackCurrent(generation, loader, connectionEpoch)
+                            || (resumeOnly && eofState != EofState.RESUME)
+                            || !ticket.compareAndSet(true, false)) return;
+                    restartPending = true;
+                    previous = channel;
+                    advancePacketGeneration();
+                }
+                // No sender lock acquired here, and don't hold modeLock across disconnect/setup.
                 replayHandler.restartedReplay();
-                restarted.set(true);
-            } else if (superseded != null && controlEpoch.get() != intention
-                    && sessionCurrent(loader, connectionEpoch)
-                    && (workerEpoch < 0 || !asyncStopped(workerEpoch))) {
-                // Retry with a fresh control request only while this same session/worker still owns it.
-                // No PacketData or resource admission receives a replacement generation.
-                superseded.set(true);
-            }
-        });
-        return restarted.get();
+                synchronized (modeLock) {
+                    if (!terminal.get() && replayHandler.ownsFullReplaySender(this)
+                            && channel != null && channel != previous && channel.isActive()
+                            && channel.pipeline().get(ReplayHandler.PACKET_HANDLER_NAME) == this) {
+                        restartedGeneration.set(resourcePackLease.generation());
+                    }
+                }
+            });
+            return restartedGeneration.get();
+        } catch (ExecutionException | TimeoutException failure) {
+            ticket.set(false);
+            ReplayModReplay.LOGGER.error("Replay restart did not complete; old callback retired", failure);
+            return -1;
+        } finally {
+            ticket.set(false); // A queued callback has no authority after this attempt exits.
+        }
     }
 
     /**

@@ -1,6 +1,8 @@
 package com.replaymod.editor.gui;
 
 import com.replaymod.core.ReplayMod;
+import com.replaymod.core.files.ReplayStorageLayout;
+import com.replaymod.core.files.ManagedReplayFile;
 import com.replaymod.core.utils.Utils;
 import com.replaymod.editor.ReplayModEditor;
 import com.replaymod.replay.gui.overlay.GuiMarkerTimeline;
@@ -66,7 +68,7 @@ public class GuiEditReplay extends AbstractGuiPopup<GuiEditReplay> {
 
         LOGGER.info("Opening replay in editor: " + inputPath);
 
-        try (ReplayFile replayFile = ReplayMod.instance.files.open(inputPath)) {
+        try (ReplayFile replayFile = ReplayMod.instance.files.openReadOnly(inputPath)) {
             markers = replayFile.getMarkers().or(HashSet::new);
             timeline = new EditTimeline(new HashSet<>(markers), markers -> this.markers = markers);
             timeline.setSize(300, 20)
@@ -152,16 +154,35 @@ public class GuiEditReplay extends AbstractGuiPopup<GuiEditReplay> {
     private void apply() {
         ProgressPopup progressPopup = new ProgressPopup(this);
 
+        final ReplayStorageLayout layout;
+        final Set<Marker> markerSnapshot = new HashSet<>(markers);
+        try { layout = ReplayMod.instance.folders.snapshotStorageLayout(); }
+        catch (IOException e) {
+            progressPopup.close();
+            Utils.error(ReplayModEditor.LOGGER, this, CrashReport.create(e, "Storage layout"), this::close);
+            return;
+        }
         new Thread(() -> {
-            try (ReplayFile replayFile = ReplayMod.instance.files.open(inputPath)) {
-                replayFile.writeMarkers(markers);
+            ReplayFile replayFile = null;
+            try {
+                replayFile = ReplayMod.instance.files.open(layout, inputPath, inputPath);
+                replayFile.writeMarkers(markerSnapshot);
                 replayFile.save();
-            } catch (IOException e) {
-                Utils.error(ReplayModEditor.LOGGER, this, CrashReport.create(e, "Writing markers"), this::close);
+                replayFile.close();
+                if (!(replayFile instanceof ManagedReplayFile managed) || !managed.isReleased()) {
+                    throw new IOException("Editor writer has not actually released " + inputPath);
+                }
+            } catch (Throwable e) {
+                if (replayFile instanceof ManagedReplayFile managed) managed.preserveRecovery(e);
+                if (replayFile != null) try { replayFile.close(); } catch (Throwable close) { e.addSuppressed(close); }
+                ReplayMod.instance.runLater(() -> Utils.error(ReplayModEditor.LOGGER, this,
+                        CrashReport.create(e, "Writing markers"), () -> { progressPopup.close(); close(); }));
+                return; // NEVER run the destructive processor after a marker write/save/release failure
             }
 
             try {
-                MarkerProcessor.apply(inputPath, progressPopup.progressBar::setProgress);
+                MarkerProcessor.apply(inputPath, value -> ReplayMod.instance.runLater(
+                        () -> progressPopup.progressBar.setProgress(value)), layout);
 
                 ReplayMod.instance.runLater(() -> {
                     progressPopup.close();

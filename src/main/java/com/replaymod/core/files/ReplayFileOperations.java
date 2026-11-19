@@ -102,6 +102,67 @@ public final class ReplayFileOperations {
      * @throws IOException if validation, copying, publication or cleanup fails
      */
     public static Path moveToRaw(Path source, Path rawFolder) throws IOException {
+        Path name = source.getFileName();
+        return moveClosed(source, rawFolder, name == null ? "" : name.toString(), false);
+    }
+
+    /** GUI publication uses the same closed-source algorithm, but permits same-parent renames. */
+    public static Path publishReplay(Path source, Path folder, String fileName) throws IOException {
+        if (fileName.isEmpty() || !Path.of(fileName).getFileName().toString().equals(fileName)
+                || fileName.contains("/") || fileName.contains("\\")) {
+            throw new IOException("Expected a single replay file name");
+        }
+        Path candidate = folder.resolve(fileName).toAbsolutePath();
+        if (source.toAbsolutePath().equals(candidate)) {
+            readRegularFile(source);
+            return source;
+        }
+        return moveClosed(source, folder, fileName, true);
+    }
+
+    /** A complete input stays on its original volume until ALL clips and readers have closed. */
+    public static Protection protectInput(Path source) throws IOException {
+        Path directory = Files.createTempDirectory(source.toAbsolutePath().getParent(), ".replaymod-original-");
+        Path note = directory.resolve("recovery.txt");
+        Files.writeString(note, "ReplayMod clipping original; version=1\nsource=" + source.toAbsolutePath()
+                + "\nprotected=" + directory.resolve(source.getFileName())
+                + "\nKeep this complete input if clipping or release fails. Outputs belong beside source.\n");
+        Path protectedPath = moveToRaw(source, directory);
+        return new Protection(directory, note, protectedPath);
+    }
+
+    public static final class Protection {
+        private final Path directory, note, input;
+        private Protection(Path directory, Path note, Path input) {
+            this.directory = directory; this.note = note; this.input = input;
+        }
+        public Path input() { return input; }
+        public void describeOutputs(java.util.List<Path> outputs) throws IOException {
+            for (Path output : outputs) Files.writeString(note, "expectedOutput=" + output.toAbsolutePath() + "\n",
+                    java.nio.file.StandardOpenOption.APPEND);
+        }
+        public void outputClosed(Path output) throws IOException {
+            Files.writeString(note, "savedAndReleased=" + output.toAbsolutePath() + "\n",
+                    java.nio.file.StandardOpenOption.APPEND);
+        }
+        public void complete() throws IOException {
+            // All fallible bookkeeping precedes destruction of the complete input.
+            Files.writeString(note, "allOutputsAndReadersReleased=true\n", java.nio.file.StandardOpenOption.APPEND);
+            Files.delete(input);
+            // An empty owned directory is harmless; failure here cannot turn successful clipping
+            // into an error falsely claiming that the already removed original was retained.
+            try { Files.delete(note); Files.delete(directory); }
+            catch (IOException | SecurityException cleanup) {
+                System.err.println("Clipping succeeded; empty protection directory retained: " + directory + ": " + cleanup);
+            }
+        }
+        public IOException failure(Throwable cause) {
+            return new IOException("Clipping failed; complete original retained at " + input
+                    + "; recovery description=" + note, cause);
+        }
+    }
+
+    private static Path moveClosed(Path source, Path rawFolder, String requestedName, boolean gui) throws IOException {
         String phase = "resolve absolute source";
         Path anchorDir = null;
         Path anchor = null;
@@ -117,12 +178,12 @@ public final class ReplayFileOperations {
             if (parent == null || fileName == null) {
                 throw new IOException("Source has no parent or file name");
             }
-            candidate = rawFolder.resolve(fileName.toString());
+            candidate = rawFolder.resolve(requestedName);
             phase = "validate source";
             BasicFileAttributes snapshot = readRegularFile(source);
             phase = "validate raw folder";
             // Reject parent-directory aliases before copying or publishing anything.
-            if (Files.isSameFile(parent, rawFolder)) {
+            if (!gui && Files.isSameFile(parent, rawFolder)) {
                 throw new IOException("Raw folder is the source parent directory");
             }
 
@@ -154,7 +215,7 @@ public final class ReplayFileOperations {
                 payload = staged;
             }
 
-            String originalName = fileName.toString();
+            String originalName = requestedName;
             int extension = originalName.lastIndexOf('.');
             String baseName = extension < 0 ? originalName : originalName.substring(0, extension);
             int number = 0;
@@ -174,7 +235,8 @@ public final class ReplayFileOperations {
                     if (number == Integer.MAX_VALUE) {
                         throw new IOException("Raw name numbering exhausted", conflict);
                     }
-                    candidate = rawFolder.resolve(baseName + "." + ++number + ".mcpr");
+                    candidate = rawFolder.resolve(gui ? baseName + " (" + ++number + ").mcpr"
+                            : baseName + "." + ++number + ".mcpr");
                 }
             }
 
@@ -210,12 +272,23 @@ public final class ReplayFileOperations {
             Files.delete(source);
             return candidate;
         } catch (IOException | UnsupportedOperationException | SecurityException failure) {
-            throw new IOException((published ? "Raw published; move incomplete" : "Raw move failed")
+            IOException diagnostic = new IOException((published ? "Raw published; move incomplete" : "Raw move failed")
                     + "; phase=" + phase + "; source=" + source + "; rawFolder=" + rawFolder
                     + "; anchorDir=" + anchorDir + "; anchor=" + anchor
-                    + "; stage=" + stage + "; staged=" + staged + "; candidate=" + candidate,
-                    failure);
+                    + "; stage=" + stage + "; staged=" + staged + "; candidate=" + candidate, failure);
+            if (gui && published) throw new IncompletePublicationException(candidate, source, diagnostic);
+            throw diagnostic;
         }
+    }
+
+    public static final class IncompletePublicationException extends IOException {
+        private final Path publishedPath;
+        private IncompletePublicationException(Path published, Path source, Throwable cause) {
+            super("Replay published; move incomplete; published=" + published + "; source=" + source
+                    + "; retain both and inspect task anchor/stage before manual recovery", cause);
+            this.publishedPath = published;
+        }
+        public Path publishedPath() { return publishedPath; }
     }
 
     private static BasicFileAttributes readRegularFile(Path path) throws IOException {

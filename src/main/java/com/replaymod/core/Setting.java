@@ -5,6 +5,11 @@ public final class Setting<T> extends SettingsRegistry.SettingKeys<T> {
     public static final Setting<String> RECORDING_PATH = advanced("recordingPath", null, "./replay_recordings/");
     public static final Setting<String> CACHE_PATH = advanced("cachePath", null, "./.replay_cache/");
     public static final Setting<String> TEMP_PATH = advanced("tempPath", null, "");
+    public static final Setting<String> RAW_PATH = advanced("rawPath", null, "");
+    public static final Setting<String> RECORDING_WORK_PATH = advanced("recordingWorkPath", null, "");
+    public static final Setting<String> TMP_PATH = advanced("tmpPath", null, "");
+    public static final Setting<Boolean> EPHEMERAL_CACHE = advanced("ephemeralCache", null, false);
+    public static final Setting<Boolean> RAW_BACKUP_ENABLED = advanced("rawBackupEnabled", null, true);
 
     private static <T> Setting<T> make(String key, String displayName, T defaultValue) {
         return new Setting<>("core", key, displayName, defaultValue);

@@ -344,3 +344,27 @@ replaymod.gui.advancedscreenshots.finished.description.360=您成功创建了360
 replaymod.gui.advancedscreenshots.finished.description.veer=上传到VeeR.tv的VR并查看图像，或在磁盘上打开它。
 replaymod.gui.advancedscreenshots.finished.upload.veer=上传到VeeR.tv
 replaymod.gui.advancedscreenshots.finished.showfile=显示磁盘上的文件
+
+# Storage settings (local draft, applied together)
+replaymod.gui.storage.title=存储设置
+replaymod.gui.storage.apply=应用
+replaymod.gui.storage.recordingPath=正式回放目录（recordingPath）
+replaymod.gui.storage.cachePath=回放缓存目录（cachePath）
+replaymod.gui.storage.tempPath=普通临时数据／native 目录（tempPath）
+replaymod.gui.storage.rawPath=原始回放备份目录（rawPath）
+replaymod.gui.storage.recordingWorkPath=录制工作目录（recordingWorkPath）
+replaymod.gui.storage.tmpPath=未提交工作目录（tmpPath）
+replaymod.gui.storage.rawBackupEnabled=保留 raw 备份（默认开启）
+replaymod.gui.storage.ephemeralCache=最后使用者退出后删除可重建缓存（默认关闭）
+replaymod.gui.storage.hint.paths=空值＝继承／默认；相对路径以游戏目录为基准。滚动查看全部选项；Tab／Enter 只切换路径输入框，不会应用。
+replaymod.gui.storage.hint.tasks=设置仅影响新任务，不迁移或删除既有数据。“应用”统一提交八项；取消／Esc 丢弃尚未应用的草稿。
+replaymod.gui.storage.hint.native=native 首次初始化后，本进程内不随设置迁移；更换 native 根目录需要重启 Minecraft。
+replaymod.gui.storage.hint.ramdisk=RAMDisk 断电会丢失内容。正式回放、备份和未保存／恢复材料应尽量放在非易失存储上。
+replaymod.gui.storage.hint.raw=关闭 raw 会保留路径值及历史备份；任务失败仍保留恢复材料，关闭备份不代表这些材料可以随意删除。
+replaymod.gui.storage.invalidType=设置类型错误或未注册：%s。请检查草稿后再应用。
+replaymod.gui.storage.validating=正在后台校验目录……此时取消／Esc 仍会丢弃草稿。
+replaymod.gui.storage.invalid=未应用。请检查路径：%s
+replaymod.gui.storage.applied=更改项已在内存生效，仅影响新任务，并已请求保存；现有配置后端的磁盘写入失败只记入日志。
+replaymod.gui.storage.callbackFailed=更改项已整体更新并请求保存，但设置回调异常：%s。请重新打开核查；不能据此确认已落盘。
+replaymod.gui.storage.updateUncertain=更新时出现异常，设置可能已经改变，尚未请求保存。请关闭并重新打开核查后再重试：%s
+replaymod.gui.storage.saveFailed=更改项已在内存生效，但保存调用异常：%s。不能据此确认已落盘。

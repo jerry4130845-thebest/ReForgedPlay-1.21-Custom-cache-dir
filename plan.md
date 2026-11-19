@@ -1,6 +1,6 @@
 # ReForgedPlay 自定义目录与 RAMDisk 支持计划
 
-> 状态（第四批实现及授权验证层通过，进入用户自行审查/提交源码检查点；实际播放器/游戏未验收）：D重试独立review和seal闭合，首D当前源码243/422与六源编译、Lead专用build59s、全新最终JAR核心243＋UUID正反23均通过且归属分开。Lead已复核五既有源码完整diff/helper关键事务与ledger/UUID段、六source及JAR指纹/白名单，14.15为最终收据与完整六sourcepatch。到此不再改实现，不Git写/安装/真实FFmpeg/player/MC/上传/whale-craft，不进入下一批；结束活跃目标后停等用户commit。前置/碎片/多轨等受限布局、nonAVC/nearheap/真实UI等未测和安全降级不得藏起。
+> 状态（剩余存储需求统一收尾已交付可测试候选；EXR已知不可用、真实游戏未验收）：A→B→C1→C2a→C2b→C3→C4→D顺序完成，六目录/两开关UI、raw可关闭、事务保存恢复/cache/native路径已实现；D两窄修及唯一完整build54s、最终JAR生产核心回归通过。最终23Java＋两语言＋计划，收据与限制见15.13。D首UI误写旧C4样本子树的流程偏差已披露，不能称旧证据全部未动。停止实现、不Git写/安装/真游戏，交用户小回放验收；目标控制面当前disarmed，本后台通知回合complete被拒，未假称目标历史已删除。
 > 用户目标：独立配置 cache、raw、temp、tmp、record 等目录，支持绝对路径及相对于游戏目录的路径；将可丢弃缓存和临时文件放在 RAMDisk，用完清理，减少实体硬盘写入。没有已报告故障，本次属于预防性兼容与容错设计。
 
 ## 1. 项目基线与证据边界
@@ -1159,3 +1159,800 @@ Lead亲核六source hash均14.10/14.11值，生成[完整六source真实patch](<
 - 本批到此停等用户审查六源码＋计划并自行commit（别漏新增helper）。AI不Git add/commit/push/reset/checkout，不复制到mods/安装、不自动进入native/cache/raw/tmp/保存恢复下一批。收尾核查后按控制面规则将活跃目标标complete以停止自动续作；没有目标历史物理删除工具，不假称已删除物理历史记录。
 
 D重试原话：我宁愿把“由谁运行、验证到哪一层”写清楚，也不让一个漂亮的 PASS 替代缺失的证据。
+
+## 15. 剩余目录/RAMDisk需求统一实施（A5，2026-11-16；B→C1→C2→C3→D）
+
+### 15.1 当前授权、基线与成功标准
+
+本节取代上文“下一批停等批准/停等commit”的**后续实施停点**，不改写历史失败/PASS。用户最新要求“剩下的直接一股脑做了”，已授权剩余相关源码及隔离验证一次完成；内部顺序切片不再逐项询问用户。只有确实必须改变受保护依赖/数据的缺口才回Lead，不以EXR单项阻断其余工作。A只追加本节，未写生产源码、未测试/构建/启动游戏，未写外部脚本或扫描旧证据目录。
+
+- 本轮第一条命令只读核实 `HEAD=fbd2c02756572b7ddae016452fc0535ac9538490`。开始状态仅有用户既存 `.whale-craft/README.md`、`.whale-craft/RULES.md`、`.whale-craft/config.json` 删除；**不恢复、不访问、不顺手处理**。本节之后这些删除不计团队改动。
+- 已实际加载本机 minecraft-java-build、minecraft-neoforge-mod 技能，并重读[构建](<build.gradle>)、[属性](<gradle.properties>)、[wrapper](<gradle/wrapper/gradle-wrapper.properties>)、[元数据](<src/main/resources/META-INF/neoforge.mods.toml>)及[libs](<libs/ReplayStudio-master-SNAPSHOT-slim.jar>)。固定 MC1.21.1 / NeoForge21.1.82 / Java21 / Architectury Loom1.7-SNAPSHOT（现有daemon日志1.7.435）/ Gradle8.8 / layered Yarn1.21+build.1＋既有NeoForge patch；**不迁移ModDev、不scaffold、不改依赖/映射/wrapper**。
+- 本机 `java` 为Oracle21.0.12.1，PATH裸 `javap` 却是Microsoft25；本轮所有反汇编明确使用 `C:/Program Files/Java/jdk-21.0.12.1/bin/javap.exe`。后续 javac/java/javap 同样钉此已安装JDK，不安装下载或改环境。
+- 完成标准：rawPath、recordingWorkPath、tmpPath真实落点；连续save→读取→再编辑/save；旧/新sidecar与重启恢复无丢失；录制写者排空后才提交；跨盘raw/GUI闭合；外部回放缓存不碰撞、不误删；ephemeralCache默认false，最后真实使用者释放才可删；native与回放cache隔离；已有图片/资源包lease/视频事务不回退。build和生产逻辑隔离验证都有新收据；未做游戏/驱动测试必须明列。
+
+### 15.2 A5新核查事实（不是引用旧结论当实测）
+
+| 对象 | 本轮直接核查及约束 |
+| --- | --- |
+| ReplayStudio实际依赖 | [构建](<build.gradle#L89-L90>)仍为flatDir优先的master-SNAPSHOT-slim；本机Gradle模块缓存未找到ReplayStudio JAR，不捏造一个“缓存版本”。本地JAR SHA256=`e034b0a39cc906ba38c401a13c09bf6fca5512ecb658428380994f71b7d48250`；其**6964个class与当前dev-shadow逐一字节相同，0差异**。ZipReplayFile本地/dev-shadow class均`698bb1fbdaeef8996b3a34c66d72092eab041bb67c2148a830f808c98a0e988c`。现有[最终JAR](<build/libs/reforgedplaymod-1.21.1-0.3.1.jar>)整体hash仍`358d39385591675fcb875cb6ac2ffbb946ca79ba816f0576342158c4d7b42612`，该class remap后`d0abc9fa40c4705b3fba8ee03fbfe8e93862f5bc5738f8f623193b3013ce9b9c`；已另对最终class实际javap，不把hash差异当版本变化。未运行Gradle解析任务，下一次build仍须复核实际输入/产物，不能声称动态坐标永不变。 |
+| 构造与恢复 | 本地/最终class的四参数签名均 `ZipReplayFile(Studio, File input, File output, File cache) throws IOException`；39–72从**output**派生`.tmp`，内有changed/removed/source；input=null时才尝试读取source定位旧ZIP，随后枚举changed/removed恢复增删。第四参绝不是tmp。导入sidecar须含removed和source语义，不能仅复制ZIP。 |
+| save/saveTo/close | 新javap：save会系统createTempFile→saveTo→close→删output→move→重新ZipFile；**它并非永久关闭后不能再用**，但有删除窗口。saveTo先关闭登记的输出流，再FileOutputStream截断传入目标，合并未改ZIP项与changed（跳removed），不清sidecar、不关闭自身ZIP；close清map并递归删除tmp（83–88）。Utils.copy正常EOF才关闭输入，异常不能假设无残留句柄。禁止底层save、禁止底层saveTo直接写正式/raw最终文件、禁止不保恢复材料便finally close。 |
+| 最小适配面 | 新javap确认 `AbstractReplayFile(Studio) throws IOException`；高级meta/packet/markers/timeline/assets方法通过基础get/write/remove实现，可继承它并只适配7个基础读写/cache方法＋save/saveTo/close，避免重写全部高层协议。packet输出也必须经过真实基础write追踪，不可只追踪调用者显式write。 |
+| 录制/调用缺口 | [PacketListener](<src/main/java/com/replaymod/recording/packet/PacketListener.java#L246-L303>)忽略awaitTermination返回false/中断和packet流close失败，submit里的异常也未汇总，随后仍save；no-output分支提前关GUI、写no_recover、saveTo最终raw。[ResourcePackRecorder](<src/main/java/com/replaymod/recording/packet/ResourcePackRecorder.java#L83-L110>)另有不在saveService内的写入，不能只排空该executor就断言全部写者结束。[GuiEditReplay](<src/main/java/com/replaymod/editor/gui/GuiEditReplay.java#L155-L164>)写markers失败catch后仍继续MarkerProcessor，须局部return。 |
+| 跨盘/恢复/cache | [FilesService](<src/main/java/com/replaymod/core/files/ReplayFilesService.java>)仍直接搬录制目录项、只扫正式根同级tmp、按URL反解缓存且递归删除；[Folders尾部](<src/main/java/com/replaymod/core/files/ReplayFoldersService.java#L542-L589>)仍固定raw/recording、跨卷relativize；[GUI](<src/main/java/com/replaymod/recording/gui/GuiSavingReplay.java#L139-L166>)主线程直接move。不能只增加设置而保留这些调用。 |
+| LWJGL完整现有打包面 | 已逐一读取现有最终JAR全部12个嵌套JAR目录（主JAR8439项），并检查源码树及processIncludeJars；**均无com/replaymod/render/utils/lwjgl.jar，也无其他lwjgl.jar**。lwjgl-utils只有131项GUI旧工具，不是LWJGL3 core。嵌套TinyEXR/processIncludeJars字节相同，嵌套lwjgl-utils/processIncludeJars亦相同；TinyEXR.class hash=`4889f216d47b7f54c5741e04914a03f703db35b62633c7522441dac797e013b0`。主JAR已含TinyEXR3.3.1的windows/x64 DLL411648B、linux/x64 SO162288B、macos/x64 dylib245880B。 |
+| 可用替代classpath | 新读MC1.21.1的Gradle缓存minecraft-info.json：MC自带core/GLFW/OpenGL/OpenAL/STB/allocator等为3.3.3；本机core3.3.3 Java及windows/x64 native JAR均实际存在（DLL479232B）。本机另有3.3.1 Java缓存，**缓存中存在不等于实际游戏classpath，禁止偷偷以它补运行依赖**。可用“child从parent资源定义现有core3.3.3＋已打包TinyEXR3.3.1”，不需要制造缺失胖JAR。实际游戏未启动，以上是构建/MC声明及实际二进制静态清单，不冒充已运行的加载器资源可见性。 |
+| native真实API与陷阱 | 新javap core3.3.3的Configuration存在`set(T)`（反射擦除Object）、LIBRARY_NAME/LIBRARY_PATH/SHARED_LIBRARY_EXTRACT_PATH/FORCE。TinyEXR3.3.1静态初始化实际调用`Library.loadSystem(Consumer,Consumer,Class,String,String)`。core3.3.3的SharedLibraryLoader在指定extract path不可写时**仍会回退系统temp/cwd/home**；仅set配置不够。Library.loadSystem对file资源且FORCE=false可直接System.load，core LIBRARY_NAME绝对路径也可直接load。EXRWriter.create确实走loader；A未加载native、未宣称EXR通过。 |
+
+外部来源核对日2026-11-16：[JDK21 Files](<https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/nio/file/Files.html>)核实createTempDirectory/createLink/mismatch/move、NOFOLLOW与可选能力边界；ATOMIC_MOVE不提供“目标存在绝不覆盖”。[LWJGL3.3.1 Configuration源码](<https://raw.githubusercontent.com/LWJGL/lwjgl3/3.3.1/modules/lwjgl/core/src/main/java/org/lwjgl/system/Configuration.java>)及[实际core3.3.3 SharedLibraryLoader源码](<https://raw.githubusercontent.com/LWJGL/lwjgl3/3.3.3/modules/lwjgl/core/src/main/java/org/lwjgl/system/SharedLibraryLoader.java>)已搜索后读取，确认初始化时序、回退与全局librarypath副作用；最终判断优先本机上述javap。未增加NeoForge事件API/Maven坐标，无需编造签名。
+
+### 15.3 固定最小设计与项目自有接口（不是外部库API）
+
+**设置/布局。** 在advanced注册 `RAW_PATH="rawPath"`、`RECORDING_WORK_PATH="recordingWorkPath"`、`TMP_PATH="tmpPath"`（String默认空）及 `EPHEMERAL_CACHE="ephemeralCache"`（Boolean默认false）；保留recordingPath/cachePath/tempPath原键。raw/work空值各继承正式根/raw、/recording；tmp空值在逻辑output父目录建立专属workspace，独立指定时在指定tmp根建立workspace；temp空值仍JDK默认选择。相对路径固定游戏runDirectory，拒绝Windows盘相对/根相对，不展开变量；非空错误不静默换盘。每个打开/录制/GUI任务固定快照；不热迁移旧任务。
+
+仅新增以下5个窄类，不引入策略总线/泛型事务框架/新的依赖或测试钩子：
+
+| 拟新增源码 | 固定职责和接口边界 |
+| --- | --- |
+| `src/main/java/com/replaymod/core/files/ReplayStorageLayout.java` | 纯JDK不可变布局；静态`resolve(Path gameDir, String recordingPath, String rawPath, String recordingWorkPath, String tmpPath, String cachePath, String tempPath, boolean ephemeralCache) throws IOException`，访问器`replayRoot/rawRoot/recordingRoot/tmpRoot/cacheRoot/tempRoot/ephemeralCache/recoveryRoot`（Path，开关除外；tmp/temp未配置可null）。统一规范化/已有祖先realPath和链接边界检查；不改Folders既有图片/资源包lease/视频方法。recoveryRoot固定gameDir下`.replaymod-recovery`，只存小定位记录，不存整份录像。 |
+| `src/main/java/com/replaymod/core/files/ReplayWorkspace.java` | 纯JDK单回放工作区、归属/锁、小恢复记录和目标盘发布；`create(ReplayStorageLayout, Path input, Path output, boolean readOnly)`、`recover(ReplayStorageLayout, Path record)`、`scanRecovery(ReplayStorageLayout)`；内部持有base/physicalOutput/sidecar/stage/逻辑目标，不暴露任意递归删除入口。返回类型本类、List<Path>按上述语义固定。保存发布、恢复描述和精确owned清理的辅助方法留本类package-private，由C1细化，不另造第6个框架类。 |
+| `src/main/java/com/replaymod/core/files/TransactionalReplayFile.java` | `extends AbstractReplayFile`，构造`(Studio, ReplayWorkspace, ReplayCacheLease) throws IOException`；实现ReplayFile基础面；mutable delegate可有，但**save不调用delegate.save或delegate.close**。持有read/write/cache流与首次真实close完成回调；package-private`onReleased(Runnable)`供Managed封装，回调只在真实关闭全部底层/流后执行一次。不能用逻辑close请求冒充释放收据。 |
+| `src/main/java/com/replaymod/core/files/ReplayCacheLease.java` | 纯JDK，`acquire(ReplayStorageLayout, Path logicalReplay) throws IOException`、`path()`、幂等`close()`、`cleanupStale(ReplayStorageLayout)`；进程内引用计数＋进程独占命名空间/锁。读写cache流也计使用者，最后实际release才处理ephemeral，失败只诊断保留。 |
+| `src/main/java/com/replaymod/render/utils/LwjglNativeWorkspace.java` | 纯JDK，`open(Path selectedTempRoot, ClassLoader resources) throws IOException`、`directory()`、`nativeResource(String)`、`cleanupStale(Path selectedTempRoot)`。只准备现有classpath资源、进程workspace/锁与file URL映射，不安装/下载，不重写LWJGL类。无新增embedded lwjgl.jar；以后若真实资源存在也只能复制进本任务temp。 |
+
+Folders仅加`snapshotStorageLayout()`和`snapshotNativeTempRoot()`（后者只复用tempPath解析选择，不创建图片/视频任务）；FilesService加`openReadOnly(Path)`供已核实只读列表/markers读取，保持既有open签名。正常open仍可编辑；readOnly只禁止回放数据write/remove/save，允许cache操作。避免预览为获得元数据复制整部录像；可写open使用私有base快照以解除Windows目标ZIP句柄对发布的阻塞，需明确容量/额外一次复制代价，不长期硬链接可写源或把整文件读入heap。既有DelegatingReplayFile不用重写。
+
+**事务/恢复算法。**
+
+1. 取得布局、逻辑input/output的规范身份/服务锁和cache lease；先建立唯一workspace、owner记录、存活锁，再创建delegate。可写input流式复制为workspace私有不可变base并mismatch验证（不动原件）；readonly可直接读原ZIP，但物理output仍是本任务路径。发现旧output.mcpr.tmp时完整导入changed/removed/source，原sidecar在新工作副本验证可恢复前绝不删除；旧source读取有界且按真实构造规则处理input=null，不能漏掉“原ZIP不存在但source指别处”情形。构造任意IOException/RuntimeException/Error均回收已取得的服务锁/lease；若底层句柄释放不明则保守保留诊断，不仅catch IOException。
+2. 基础write/writeCache返回受控真实流；高级ReplayOutputStream通过AbstractReplayFile走同一跟踪。save只在**所有输出流成功结束且无写入失败**后进行；不靠底层saveTo替调用方强关活跃packet流。保存锁串行化新写入，已有输入流不被save关闭；同条目尚有读者时拒绝破坏性重写，而非截断其正在读取的sidecar。保存期间不重定向cache身份。
+3. 在逻辑目标父卷独占stage中调用**delegate.saveTo(stageFile)**，完整关闭ZIP写句柄，流式校验ZIP所有条目可读/CRC、必要metadata/recording条目（兼容minimal模式），以及删除/新增/未知条目不丢。只读回放格式检查与真实游戏可播验收分开。stage、预期目标身份/旧hash、工作区、阶段写入小记录后才能发布。自有saveTo(File)也走相同事务导出，不改变原save目标，不把其参数直传底层；新导出不覆盖已有项。
+4. 新目标用stage所在卷的createLink不覆盖发布（现有能力取舍延续，无硬链接明确保源失败）；编辑替换仅在源快照/目标身份仍一致、调用方独占且目标盘支持原子替换时执行，不先删旧目标，不用ATOMIC_MOVE当CAS/no-clobber。无原子替换安全失败，stage/旧目标/workspace均留存。写完后重新验证正式目标，再标记committed；异常区分未发布/已发布待收尾/结果不确定，不能错误提示整次成功。对恶意外部竞态、断电目录持久化不作保证。
+5. **保持delegate私有base＋累计changed/removed活着，不在save后重建/清tmp。** 因此同一公开ReplayFile可继续get/write/save，已有输入流不失效；下一次save仍合并完整状态。不需要每次save复制base或反射修改ReplayStudio私有字段。新增写入重新标dirty；cache写不算录像dirty。
+6. close先停止新准入；任何活跃读/写/cache流都须先结束，延迟实际close而不强关仍在用的流/复制仍被写的sidecar，也不在主线程无限等。无活跃流且无未提交修改（含readonly/未改任务），才允许底层close及owned清理；有未提交修改/提交失败，先将base＋完整sidecar树（或已验证完整checkpoint）保存为可独立恢复材料并核对，记录实际恢复位置，**然后**才允许有删除副作用的delegate.close。保护复制失败则不调用破坏性close，报告保留路径。close失败不在finally强删；重复close/异步最后流close不能重复底层破坏动作。旧资源包读流仍活着时保持其base/lease；正常已排空的录制/closed-file搬移必须取得同步实际关闭结果，不走延迟分支。Managed只在真实release收据后解锁/释放cache，不在逻辑请求时onClose。
+7. 恢复记录采用有版本、UUID、逻辑input/output、workspace/base/sidecar、stage/目标、phase及拒绝恢复状态的小文件；原子更新小记录或保留前代，不能半写后按文件名猜状态。固定游戏recoveryRoot使修改配置后仍能找到旧自定义tmp/work路径；只扫描该索引＋当前明确根的旧布局，不扫描磁盘。验证记录/owner/目录边界、NOFOLLOW，活跃锁跳过；锁不可证则保留/报告。记录不是任意文件删除授权，不跟随链接递归清理，不把root、raw、录像或未提交sidecar当cache删。
+8. initialScan不再盲目move非空目录；旧正式/录制工作根`.mcpr.tmp`与新记录都交恢复入口；恢复GUI持记录映射物理工作区与逻辑目标，先安全save合并旧包，再重写时长，再save，兼容同一实例继续用。拒绝恢复只标记对应材料及时间，不先删除已有`.del`；2日清理只限已验证归属且无活跃锁的拒绝项。`.no_recover`只能在raw完整提交后对应清理，不能凭该标记删唯一恢复材料。
+
+**调用、cache与native。**
+
+- 录制启动固定layout/work路径，初始化中途失败也走保恢复close。PacketListener终止准入→排空saveService并确认返回true（中断保中断标志）→ResourcePackRecorder禁止新写并等正在写者完成→成功关闭packetOutputStream→检查所有记录的首个异步错误→save→真实close后才raw/后处理；超时/close/写失败中止提交并保恢复。不在GUI线程join；重复channelInactive只启动一个收尾任务，不用shutdownNow冒充已刷盘。ResourcePackRecorder局部增加stop/在途写者门，整个index＋payload写阶段受同一生命周期保护，晚到回调不能在close后写。
+- no-output也先安全保存工作回放并close，再复用既有moveToRaw得到完整raw，最后关闭GUI/完成记录；取消提前“成功”与最终raw直接saveTo。MarkerProcessor延续moveToRaw保源契约，显式关闭自身packet输入流；只读探测走openReadOnly。GuiEditReplay写失败即return，不继续剪辑。
+- ReplayFileOperations保留已验证moveToRaw算法；只添加窄`moveToReplayFolder(Path source, Path replayFolder, String replayName) throws IOException`，GUI命名`name (1)`与raw`.1`规则不变；内部复用现有复制/身份锚点/验证/不覆盖发布，不复制一整套算法。GuiSavingReplay主线程快照名称/目标布局并禁重入，后台串行搬移，主线程展示结果/刷新；失败保留原文件和实际已发布路径，不无条件close并当全成功。空名删除仅限该已关闭输出，发生失败也报告。
+- cache采用`cacheRoot/replay-v2/<SHA256规范逻辑绝对身份>/<进程UUID>/...`，owner元数据绑定原路径；已有文件realPath，未存在文件用已解析真实父目录＋名称，处理Windows大小写/别名，不跨卷relativize，不仅文件名。相同逻辑回放在本进程共享lease计数；不同进程独占payload防互删。ephemeral在acquire时快照，最后delegate与所有cache/数据流真释放才删本namespace；关闭失败/所有权不明保留。持久默认7日/回放不存在策略只用于已识别且无活跃锁的新namespace；旧合法cache可保留兼容读取/独立受限清理，解码后的绝对/..路径拒绝；未知顶层、旧lwjgl-natives绝不按回放不存在递归删除。raw保留21日兼容，但跳过活跃任务和目录/链接，不扩展为raw即时清理。
+- native首选**不需要临时JAR**：child loader沿用现有parent资源字节fallback定义org.lwjgl及EXR实现类（Frame/FrameConsumer等接口仍parent共享）；删除“没有lwjgl.jar就必失败”的前置门。LwjglNativeWorkspace从parent实际可见资源取MC core3.3.3及已打包TinyEXR3.3.1当前平台native，流式复制校验到tempPath下独占进程任务，保留相同bundled resource相对布局；child getResource优先把已准备native映射为本任务file URL。初始化任何Library/Platform等native依赖前，反射设置**child**Configuration：core LIBRARY_NAME绝对路径、LIBRARY_PATH仅本任务、FORCE=false及EXTRACT_PATH本任务；不改全局java.io.tmpdir/org.lwjgl.librarypath/org.lwjgl.tinyexr，不允许SharedLibraryLoader再去其他目录解包。parent JVM属性有冲突或资源来源/ABI不可验证则针对EXR明确失败，不能混用缓存3.3.1补齐或偷偷用MC已加载库。
+- 上述file URL方案必须由C3/D用真实Library调用顺序验证（不是仅检查配置值）；若SharedLibraryLoader仍被调用/回退或NeoForge parent不暴露所需native，先保留可诊断的EXR失败及具体缺少资源/路径，向Lead交单项缺口，其余继续。现有包仅TinyEXR x64，ARM不得谎称支持。进程任务锁/owner及PID＋startInstant防跨进程误删；已加载后本进程不删native、不因URLClassLoader.close就声称已卸载，进程结束后下次启动/下一次native初始化确认原进程结束且锁/归属可信再清理；无法确认保留。无deleteOnExit/崩溃必清承诺。ReplayFilesService启动可调用纯JDK stale cleanup，不初始化native。
+
+### 15.4 精确源码白名单与B/C/D所有权
+
+仓库写入仅下表**19份源码**；本计划仅A/Lead追加，B/C/D只读，不另建PLAN.md。B→C1→C2→C3→D顺序，不重叠writer；D可在相同白名单内修明确小bug，语义/接口扩大先交Lead而非静默加文件。
+
+| 精确文件 | B | C | D |
+| --- | --- | --- | --- |
+| 拟新增 `src/main/java/com/replaymod/core/files/ReplayStorageLayout.java` | 最小类型/上述接口和合同 | C1布局 | 审查/小修/实际类验证 |
+| 拟新增 `src/main/java/com/replaymod/core/files/ReplayWorkspace.java` | 最小类型/接口，未实现在入口抛错 | C1事务/记录/恢复核心 | 同上 |
+| 拟新增 `src/main/java/com/replaymod/core/files/TransactionalReplayFile.java` | AbstractReplayFile真实签名骨架，未实现抛错 | C1可续用save/流/close | 同上 |
+| 拟新增 `src/main/java/com/replaymod/core/files/ReplayCacheLease.java` | 窄lease接口/合同 | C1最小真实acquire/path/释放；C2完整计数/归属/清理 | 同上 |
+| 拟新增 `src/main/java/com/replaymod/render/utils/LwjglNativeWorkspace.java` | 窄资源/进程任务接口 | C3资源准备/遗留清理 | 同上 |
+| [Setting.java](<src/main/java/com/replaymod/core/Setting.java>) | 不改 | C1仅4新键 | 同上 |
+| [ReplayFoldersService.java](<src/main/java/com/replaymod/core/files/ReplayFoldersService.java>) | 不改 | C1布局/raw/work/tmp快照；C2 cache身份；C3 native temp快照 | 保护既有lease/图片/video方法 |
+| [ReplayFilesService.java](<src/main/java/com/replaymod/core/files/ReplayFilesService.java>) | 不改 | C1 open适配；C2恢复/清理/lease；C3只接native stale清理 | 同上 |
+| [ManagedReplayFile.java](<src/main/java/com/replaymod/core/files/ManagedReplayFile.java>) | 不改 | C1幂等真实release后回调，失败不假解锁 | 同上 |
+| [ReplayFileOperations.java](<src/main/java/com/replaymod/core/files/ReplayFileOperations.java>) | 不改 | C2仅复用原核心新增GUI窄入口 | 不削弱既有raw证明 |
+| [RestoreReplayGui.java](<src/main/java/com/replaymod/core/gui/RestoreReplayGui.java>) | 不改 | C2记录/新旧布局恢复/拒绝标记/失败保源 | 同上 |
+| [ConnectionEventHandler.java](<src/main/java/com/replaymod/recording/handler/ConnectionEventHandler.java>) | 不改 | C2单次录制布局/初始化失败释放 | 同上 |
+| [PacketListener.java](<src/main/java/com/replaymod/recording/packet/PacketListener.java>) | 不改 | C2写队列错误/终止门/流结束/raw无输出分支 | 同上 |
+| [ResourcePackRecorder.java](<src/main/java/com/replaymod/recording/packet/ResourcePackRecorder.java>) | 不改 | C2仅录制写者终止/在途门，非回放lease重写 | 同上 |
+| [MarkerProcessor.java](<src/main/java/com/replaymod/editor/gui/MarkerProcessor.java>) | 不改 | C2只读入口/输入流close/原raw接入核对 | 同上 |
+| [GuiSavingReplay.java](<src/main/java/com/replaymod/recording/gui/GuiSavingReplay.java>) | 不改 | C2后台跨盘发布/结果，主线程只UI | 同上 |
+| [GuiEditReplay.java](<src/main/java/com/replaymod/editor/gui/GuiEditReplay.java>) | 不改 | C2只读预览、写失败return/close错误分流 | 同上 |
+| [GuiReplayViewer.java](<src/main/java/com/replaymod/replay/gui/screen/GuiReplayViewer.java>) | 不改 | C2只改列表读取为openReadOnly | 同上 |
+| [Lwjgl3Loader.java](<src/main/java/com/replaymod/render/utils/Lwjgl3Loader.java>) | 不改 | C3现有资源加载/child配置/进程temp，不再cache/native混用 | 同上 |
+
+严格保护：构建/属性/settings/wrapper/libs/映射/metadata、本地化/README/.env、仓库测试及实际配置/游戏/录像；[Image.java](<src/main/java/de/johni0702/minecraft/gui/versions/Image.java>)、[FullReplaySender.java](<src/main/java/com/replaymod/replay/FullReplaySender.java>)、[ReplayHandler.java](<src/main/java/com/replaymod/replay/ReplayHandler.java>)、[ReplayResourcePackReleaseBridge.java](<src/main/java/com/replaymod/core/files/ReplayResourcePackReleaseBridge.java>)、[MetadataInjector.java](<src/main/java/com/replaymod/render/metadata/MetadataInjector.java>)、[VideoMetadataTask.java](<src/main/java/com/replaymod/render/metadata/VideoMetadataTask.java>)及第四批其他源均只读，不回退既有释放/视频事务。若发现必须改保护源码才能正确实现，Lead先核实最小必要扩权，不能C自行加白名单或每项问用户。Git仅只读，不add/commit/reset/checkout/push，不安装到mods，不下载/升级任何包。
+
+### 15.5 顺序交接与D验证门（未来执行，不是A已通过）
+
+1. **B**只写5新类窄骨架，真实外部签名以15.2为准，自有未实现分支抛错，不接生产、不铺巨大框架、不构建；报告各文件/接口/占位清单。**C1**完成layout/workspace/真实ReplayStudio适配及Settings/Folders/Files/Managed最小接入；用新CTemp小探针证明连续save、removed/changed和失败先保恢复，再交C2，不等用户批准。为使C1能直接测生产adapter，C1同时实现cache最小真实acquire/path/锁与release，暂不自动删，不能用假lease替身宣称成功；完整共享计数/ephemeral/遗留清理由C2接续，C1不得签完整cache已完成。
+2. **C2**完成录制流终止/全部调用、旧新恢复、raw/GUI和cache；可回修C1白名单内接口，不并行writer。**C3**只做native及指定两服务接入；不以单项ABI/资源问题撤销C1/C2。每片交Lead真实diff/新增类接口/源码hash、外部证据位置、实际执行/未测、遗留材料；片间不重复完整build，最终D一次完整build（失败小修后重做必要验证/build）。
+3. 新隔离目录仅 `C:/Temp/reforgedplay-B5-*`、`C:/Temp/reforgedplay-C5-*`、`C:/Temp/reforgedplay-D5-*`（唯一不可覆盖）；测试代码/classes/小样本/日志全在新目录，**不得写仓库测试，不扫描/覆盖历史证据**。建议全链合成样本总预算≤64MiB、单样本≤4MiB，累计保守计副本/保留材料/硬链接逻辑大小，不删失败证据“腾预算”；classes/JAR/日志另计。不碰用户录像、不卸载/灌满RAMDisk；C盘内小样本＋既有允许卷的新小隔离目录验证跨卷，若本次只获准C:/Temp则其他卷物理正例标未测，用新C:/Temp的provider故障测试覆盖逻辑，不把它冒充真实跨卷。
+4. D先只读HEAD/status/diff及白名单，保存本轮新源hash和既有保护源hash；javac/java明确21。**直接编译/运行生产新增类和真实ReplayStudio/JAR**，不复制事务模型，不把反射/字面边界探针冒充完整GUI。既有Junit依赖允许build原样执行，但NO-SOURCE不是JUnit通过；不下载补CP。外部harness若需MC边界替身，明确替身范围，同时实际生产adapter/IO核心必须真实运行；最终JAR优先classpath再次跑核心，防harness classes遮盖artifact。
+5. 核心矩阵：默认/自定义绝对/游戏相对/中文空格路径；不同逻辑同名/目录外/跨卷身份；非法/重叠/链接/junction/未知owner保护；完整ZIP/sidecar新增+删除+source旧指向；同一对象save→get→write→save→close→重新打开；saveTo导出后原对象继续用；输出流未完/失败必须拒绝发布；copy/ZIP校验/发布/正式验证/close/清理故障和目标冲突保留旧数据；恢复重启新进程/索引跨配置变化、拒绝恢复/活跃锁、进程中断各阶段；cache两使用者/双进程/重复close/close失败/流未释放/ephemeral两值；零归属证明不删。使用≤4MiB真实合成有效回放容器，而不拿随机字节冒充录像验收。
+6. 调用验收至少实际源码录制终止方法/资源写者门、no-output raw流程、GuiEditReplay错误return、GUI后台线程边界/失败不提前成功、新旧恢复入口；无法headless执行的whole GUI/网络/全MC加载明确UNTESTED。对资源包lease既有三层释放语义做非回归检查，尤其延迟源流close时cache不能提前删、base不能提前消失；图片/video已有方法保持字节/语义不变并跑必要真实生产回归，不复制旧PASS计本轮次数。
+7. native验证单独起全新Java21短进程，当前已有core3.3.3＋真实嵌套TinyEXR3.3.1＋本次生产loader/workspace；记录classloader/资源URL/实际native落点、parent配置前后和main cache哨兵。最小1×1 EXR（≤4MiB）经真实TinyEXR及尽可能实际EXRWriter消费/读回，证明ABI，不只Class.forName。覆盖不存在embedded JAR的替代路线、显式不可用temp不回退、带空格/中文、已加载时不删除、后继进程stale清理、双进程隔离及资源缺失安全失败。若只能证明headless native核心，不签whole Minecraft EXR渲染。ARM/Linux/macOS本机未测不宣称通过。
+8. **唯一允许wrapper构建调用**：`mc_gradle(projectDir="C:/Users/zhenz/Desktop/ReForgedPlay-1.21", task="build", args=["-Djava.io.tmpdir=C:\\Temp","--console=plain"], timeoutMs=1200000)`。不clean/refresh/-x test，不shell gradlew，不增加compileJava/dependencyInsight等Gradle调用；已有依赖无需安装/补包。记录真实工具输出/耗时/任务状态与最终non-dev-shadow产物hash；复核实际ReplayStudio class与本地/dev-shadow、嵌套native/class清单。动态坐标变动/真实缺包回Lead，不自行改版本。
+9. D可白名单内小修，但必须重跑涉及生产路径及最终build；最终按“已通过/安全拒绝或降级/未覆盖/需Lead决定的依赖缺口”四栏回报，不用build或JUnit NO-SOURCE代替测试，不装包/跑游戏验收。只把确实需要改依赖、受保护数据/源的阻塞交Lead，其余按本统一授权继续直到可交付。
+
+**当前未验证/主要风险**：C1事务适配尚未实现，Windows目标句柄/私有base与旧sidecar导入必须用真实依赖证明；硬链接/原子替换/进程锁是可选能力，安全失败不能宣传任意RAMDisk可用；readonly预览不能吃掉旧sidecar；延迟close的流与cache释放必须同一真实收据。native替代方案静态资源足够构成候选，但3.3.3 core＋3.3.1 TinyEXR实际ABI、NeoForge资源可见性及“不回退解包”仍UNVERIFIED；不能谎称EXR已通过。无安装、真实游戏、物理满盘/卸载卷、断电持久化保证。以上均不授权回退已完成图片/资源lease/视频事务，也不是把全部其他目标卡在EXR前的理由。
+
+### 15.6 Lead复核、独立只读意见与用户新增UI/raw开关（当前实施优先）
+
+A已完成并返回19源码方案；用户随后明确补充两项：在mod设置中提供新增设置的UI，raw允许关闭不保留。该直接授权扩展15.3–15.5，旧表中不改本地化/GUI的限制不再适用于本节指定四文件；不要求用户再批准一个小批次。实际录像/运行配置、依赖/构建/测试/.env仍受保护。A未获知此补充，不把Lead新设计算作A已验证。
+
+- `Setting`新增第五个键 `RAW_BACKUP_ENABLED`，序列化 `rawBackupEnabled`，Boolean默认true；布局增加同名布尔快照并和raw/work/tmp/ephemeral一道固定。保留上述8参数resolve作为可兼容重载（默认raw开启），另加明确raw布尔的重载/访问器即可，不为一个开关另造服务。C1负责键和布局；C2负责所有实际raw调用。
+- raw关闭时：不创建/写入新的raw目录和备份，不删除历史raw；绝不能简单跳过MarkerProcessor的move却在仍读原件时覆盖它。可采用原文件所在卷的本任务临时保护目录/文件，保留完整已关闭输入，腾出输出路径后剪辑；仅在全部输出验证成功、读者真实释放后清理保护材料，失败保留并记录原件/输出/恢复位置。临时保护不是长期raw备份，不允许把唯一保护偷偷迁往易失temp后提前删稳定源。相同卷不覆盖发布/归属/能力不足保源契约仍成立；只读者打开原文件的Windows句柄不能阻止后续安全发布。若需要小恢复描述，复用ReplayWorkspace窄能力，不加通用框架。
+- no-output分支在raw关闭时不另存raw；只在录制写者正确排空、必要流成功关闭且正常终结已确认后执行原‘没有剪辑输出’语义，任一保存/发布/关闭失败仍保留可恢复数据。开关不等于吞掉失败或删除唯一恢复材料；默认开启沿用15.3安全raw路径。
+- UI：现有设置页增加‘存储设置’入口，专用页可编辑recordingPath/cachePath/tempPath/rawPath/recordingWorkPath/tmpPath，并提供rawBackupEnabled、ephemeralCache开关；解释空值继承、游戏目录相对路径、RAMDisk恢复风险与任务快照。raw关闭时其路径输入可禁用但保存原值，重新开启可复用；禁止自动迁移/清空旧目录。应用先纯校验再一次提交所有键并持久化；取消/Esc不部分写配置，路径错误在UI显示而非崩溃。不在UI线程做复制或递归目录扫描；六路径+两开关在小窗口应可滚动或分页，不能挤出屏幕。
+- 精确新增白名单（在15.4的19源码之外）：`src/main/java/com/replaymod/core/gui/GuiReplaySettings.java`（现有入口）；拟新增 `src/main/java/com/replaymod/core/gui/GuiStorageSettings.java`；`src/main/resources/assets/replaymod/lang/en_US.lang`、`src/main/resources/assets/replaymod/lang/zh_CN.lang`（只增本功能文案，实际语言资源是.lang，不臆造JSON）。总上限21源码＋2语言资源＋本计划；当前仍只有计划改动。
+- 顺序变为B→C1→C2（必要时顺序两片）→C3→C4(UI)→D。B仍只建原5类骨架；C4只改上述UI/语言四文件，必要时在已有Setting中修本功能display键，但不扩大到后端配置读写器或实际用户配置。先读项目自身GUI接口/当前用例和语言加载机制再写，不凭记忆拼GUI API。D加入UI应用/取消/无效路径与raw开关全分支验证，明确headless与实际游戏界面未测的差别。
+- Lead另留独立验收清单 `C:/Temp/reforgedplay-Lead5-acceptance-69a55ca3.md`，来自实际源阅读和storage-acceptance只读复核，非测试报告。尤其补足mc.send迟到包入口/重复断连；ResourcePackRecorder的index与blob完整生命周期（blob成功后再发布index，同hash并发、关闭/换录像后迟到回调）；GUI多项部分成功后重试不重复发布；cache open与cleanup同一准入互斥。优先最小同一状态锁/真实流跟踪，不为每项另造租约框架。storage-review旧队员恢复因provider chatgpt无adapter失败，无源码修改；独立storage-acceptance已只读回报，失败队员不计验证签名。
+- Lead已读取GuiReplaySettings、SettingsRegistry及LangResourcePack并获独立只读复核：六String键及两个专用开关保持displayString=null，不放入主页只支持Boolean/枚举的通用循环；语言资源按实际加载器写单行key=value，勿写裸续行或JSON。raw关闭时布局/校验不得为该rawPath做exists/toRealPath/建目录/容量探测，保存原字符串，实际raw调用必须先检查任务开关。
+- 为避免UI逐键set触发回调时观察到半套目录，精确再纳入 `src/main/java/com/replaymod/core/SettingsRegistry.java`，仅增加小型批量set和一致snapshot API：先整体校验注册键/值，在既有settings映射同一锁内一次更新全部键，释放锁后通知callbacks；Folders从同一次map快照解析布局。C1实现该窄API/布局快照，C4以草稿校验后批量应用并只调用一次既有save；不改原单键set、不更换后端/监听器/持久化格式。不能把单次save冒充文件落盘原子保证；既有后端save为void且IO异常只记录的限制如实保留，不扩为无关配置系统重构。最终白名单上限22源码＋2语言资源＋本计划。
+- 外部样本预算正式按15.5：全链≤64MiB、单样本≤4MiB，代码/classes/JAR/日志另计；仅新唯一C:/Temp目录，不用R盘或真实游戏资料。wrapper仅指定mc_gradle build；最后显示真实diff与最终JAR并关闭目标，不Git写、不安装、不签未执行的游戏/物理驱动验收。
+
+### 15.7 B真实交付与C1起点（不是实现/测试完成）
+
+B `3483ae2d-2c2e-4529-8db3-7434d47757aa` 已正式完成；仅新增五类骨架共340行，分别layout76、workspace53、adapter111、cache47、native53。所有未实现入口明确抛错，不接生产、无假成功。Lead逐份回读并核对status；只有五新类＋本计划及既存三项whale外部删除，git diff --check通过（只有既有LF/CRLF提示）。B用指定javap21核实真实AbstractReplayFile/Studio/shaded Optional签名；未构建/运行，外部SkeletonTestStub在独占B5目录，不能计任何通过。B回报其角色禁止读取技能正文，故未加载技能；此偏差原样记录，不冒称已加载。
+
+C1顺序接手：完成ReplayStorageLayout/ReplayWorkspace/TransactionalReplayFile及ReplayCacheLease最小真实能力；改Setting、SettingsRegistry（15.6窄批量/snapshot）、Folders、FilesService、Managed的最小接入。其余调用/恢复扫描完整衔接交C2，native/UI后续顺序完成。两开关参数顺序固定ephemeralCache, rawBackupEnabled；raw关闭跳过不可用raw根的探测。C1必须用真实ReplayStudio二进制＋生产核心在新CTemp小探针证明save→read/edit→save和失败close前保护，不能用假lease或复制模型。C1不运行完整wrapper构建、不改计划/其余源码，报告接口、实际结果与未完项后交Lead继续，不等用户再次批准。
+
+### 15.8 C1最终收据与C2顺序切片
+
+C1 `3156c9d7-01d6-4f2b-b29d-4bb50bfc5e54` 曾收到中止通知，随后返回正式完成交接；以最终报告/源码/日志核查而非先到通知断言成功或失败。Lead已读 [C1完整报告](<C:/Temp/reforgedplay-C5-C1-20261116-7f46a2/C1-report-final-3b6e.md>)、实际layout/cache/service/adapter及workspace核心445行，并复核九源SHA256全部OK。第一次sha256sum --check因CRLF尾部被当路径字符而读不到文件，不是源码hash不匹配；仅在新Lead脚本中按CRLF解析原清单后九项通过，未改原证据。
+
+- C1实测归属：javac21真实核心与九源编译；生产adapter/ReplayStudio核心60、边界19、服务设置15断言；真实新进程Runtime.halt后恢复、跨进程锁。MC-bearing边界stub和Windows故障注入选项有明确标签，不签完整游戏/可播放/物理跨卷。未运行Gradle。样本实际157392B、最大2206B，预算保守记1MiB；旧失败轮保留，不把多轮成功累加。
+- 实现九源与15.7一致；工作区仅既定白名单及三项whale外部删除。只读根不复制整部base；可写打开有一份private base、失败关闭还需独立保护副本；默认raw开关和bulk settings已真实实现，cache共享/ephemeral/cleanup仍显式待C2，native仍B占位，UI尚未实施，整项目不可此时宣称完成。
+- C2改为顺序两片，避免一个上下文同时写完整恢复/cache和所有录制/GUI：**C2a**负责cache共享/使用者回收、受控旧新恢复扫描/openRecovery、恢复GUI同entry读写适配及已确认旧材料生命周期；只写ReplayCacheLease、ReplayWorkspace、TransactionalReplayFile、ManagedReplayFile、ReplayFilesService、ReplayFoldersService、RestoreReplayGui七源中必要局部。**C2b**接录制与ResourcePackRecorder屏障、raw关闭保护、MarkerProcessor、GUI后台发布和只读预览等其余既定白名单。C2a→C2b严格顺序，不并行改源；有必要接口可在原总白名单内由Lead交接确认，不另问用户。
+- 当前RestoreReplayGui同一entry先getPacketData再writePacketData会被新adapter正确拒绝；C2a必须在自身受控workspace或恢复任务中流式转换到独立材料，再关闭旧reader后重写，不能去掉adapter保护或整份读入heap。不再盲目搬非空恢复目录、不凭no_recover删除唯一材料。
+- 同名cache身份/两个使用者/close失败或流仍活跃不提前删、open/cleanup竞态、双进程隔离、配置变更后固定索引恢复、拒绝恢复的2日安全清理是C2a必须动态证明的核心；未知owner/失去身份的材料保留并报告。持久cache默认false开关下应可合理复用已确认闲置的自己namespace，不以保留永不复用的大量副本冒充缓存。原有active目录和旧native不得误删。
+- C2a仅新唯一C:/Temp/reforgedplay-C5-C2a-*，建议样本≤8MiB、单份≤4MiB；不运行wrapper或真游戏、不改计划/测试/配置/依赖，不扫旧证据。输出生产实际验证和接口，再无停顿继续C2b/C3/C4/D。
+
+### 15.9 C2a真实收据与C2b录制/raw/GUI接续
+
+C2a `1cecfa89-af97-4a01-aae0-def690ef5cbc` 已完成并返回 [最终报告](<C:/Temp/reforgedplay-C5-C2a-20261117-58a9df/C2a-report-final.md>)；Lead已读报告、实际Managed/FilesService/cache315行及adapter关键准入点，七源SHA256全部OK，git diff --check通过。除本轮白名单及三项whale外部删除无其他仓库变更。
+
+- 实际生产Java21 javac通过；最终r4 core60、Windows边界19、cache主JVM36（另子过程5）、设置服务15、真实恢复service/GUI方法41及冷进程/跨进程锁、cache reader跨save补充通过。MC/jGui调度/布局为明确stub，方法为实际生产源码，不签真游戏/布局。未Gradle、未物理跨卷。C2a样本427668B、最大2499B，保守占1MiB；C1+C2a共保守2MiB，其余预算仍须累计。
+- 已实现真实lease共享/引用/ephemeral/stale、服务openRecovery及layout显式open/openReadOnly、固定索引/两旧根扫描、版本拒绝/两日受限清理、workspace内spool顺序packet恢复；保留无原owner/旧读者证明的legacy。真实ZipReplayFile构造/packet writer可能隐式删cache，已有独占mutation门；外部构造抛错无release证明采取进程期quarantine，不假解锁。默认persistent仅同进程idle namespace复用，跨进程隔离不互删。
+- 最终D补一项热更验收：最后persistent用户已真实释放后，将ephemeral从false改true并开启新一代任务，须按新任务快照回收；旧false用户仍在途时则保留优先。C2a现有owner.persistent在idle reopen时可能一直粘着true，不能把上一代保留策略误当所有未来代永久策略。D核实这一具体路径，若确认则在同白名单作最小修复并回归，不宣称此项已通过。
+- C2b写范围：ConnectionEventHandler、PacketListener、ResourcePackRecorder、MarkerProcessor、ReplayFileOperations、GuiSavingReplay、GuiEditReplay、GuiReplayViewer八份既有源码；可在ReplayWorkspace/Managed/FilesService三份中增加本功能所需的窄保护/locator/任务快照接入，不重写已验核心。raw=false的保护留原卷，全部输出/读者关闭成功才清，失败定位；正常no-output关闭raw不另存备份，任一排空/关闭失败不进入正常丢弃分支。
+- 为避免旧下载回调经‘当前listener’误写新录像，精确再纳入已有 `src/main/java/com/replaymod/recording/mixin/MixinDownloadingPackFinder.java`，仅绑定本次pack请求对象到所属recorder，不改Mixin JSON/其他Mixin。Lead已用指定javap21实查当前named MC JAR：ServerResourcePackManager有私有 `onAdd(UUID, PackEntry)`、`onDownload(Collection<PackEntry>, Downloader.DownloadResult)`，可在现有Mixin中用已存在的Coerce风格按pack对象身份捕获归属再消费，不凭UUID可重用/当前listener推断。写前仍核对实际调用/类签名，若不能证明归属则安全拒绝未知回调并报告，不假接收。总白名单更新为23源码＋2语言资源＋本计划；其他受保护资源不动。
+- Packet入口封口必须覆盖mc.send之前已准入的待主线程票，以及saveService所有submit（packet、metadata、addMarker）；最后metadata在这些票完成后由唯一内部终结入口提交，再shutdown/确认真正终止和首错。Worker再seal并排空RP整段blob-close→index提交，不持replayFile锁等recorder，避免反向死锁；成功关闭packetOutputStream后save→确认Managed.isReleased才搬移/后处理/成功UI。重复断连只一次，超时/中断/写失败不假成功。
+- C2b先用真实ReplayStudio javap查PacketData/ReplayOutputStream/Packet的retain/release；拒绝mc.send/拒绝executor、normal/minimal/失败各分支精确一次释放，不盲统一finally双release。具体独立只读判据在Lead验收清单。录制开始一次layout显式传至PacketListener、MarkerProcessor和GuiSavingReplay，任务中热更不得改raw策略/工作或最终目标盘。
+- C2b只用新唯一C:/Temp/reforgedplay-C5-C2b-*，建议样本≤8MiB、单份≤4MiB；原C1/C2a证据只读，不重跑到旧根。完成实际源码边界验证与旧核心必要回归后接C3/native、C4/UI及D唯一完整mc_gradle build；不要每片重复全量构建，也不以stub边界PASS冒充真实网络/GUI。
+- **Lead新动态反例已确认，交D必须修验而非UNTESTED带过**：在新 `C:/Temp/reforgedplay-Lead5-cache-policy-69a55ca3` 用真实C2a final-r4-classes＋Java21运行独立诊断，class来源实际回显指向该seal目录，结果persistent首次close保留=true、idle namespace复用=true、随后新一代ephemeral close删除=false。未改任何生产源或旧C2a证据。新样本4文件共468B（最大owner425B），与C1/C2a预算并计；不是MCPR播放验收。D在原白名单内最小修正‘闲置重开开始新策略代’并回归仍活跃false用户优先；复制诊断到新D根运行，禁止重跑覆盖本反例原log。该问题不影响当前C2b录制实现顺序，但最终不得带此已知反例交付。
+
+### 15.10 C2b真实交接与C3 native范围
+
+C2b `8d235e62-bc92-40d2-b6bf-bf50845bee06` 已完成，仅十份既有源码；Lead已读 [完整报告](<C:/Temp/reforgedplay-C5-C2b-20261117-6d8f3a/C2b-report-final.md>) 并复核十源SHA256全OK、status及git diff --check通过。录制固定layout/准入票/最终metadata/真排空、RP blob→index及原recorder归属、原卷raw-off保护、RFO GUI发布、后台重命名部分成功收据、Edit失败return、Viewer只读已实现；只额外窄修FilesService两处真实jGui prompt类型衔接，原stub类型错误证据保留，未重写恢复核心。
+
+- 实测真实MC/jGui API javac exit0；生产方法headless126、core60、实际Windows边界19通过，normal/minimal packet引用语义用真实ReplayStudio javap及引用计数探针核对。真实Mixin仅方法调用/静态签名检查，未跑NeoForge注入或网络consent；MC DTO/调度/GUI边界stub明确，不能冒充真游戏。
+- 已绑定PackEntry object归原DownloadRequest，onAdd不再猜当前listener；未绑定同UUID多请求/延迟consent歧义安全拒绝并警告，可能不录入该包，不宣传网络资源包100%齐全。超时worker继续隔离真实活写者/锁直到其退出或进程结束，不假flush。发布后收尾失败保留真实目标路径且停止自动重发，需按诊断人工核查；正常后项发布前失败的部分重试已测。
+- 全轮样本263887B、最大2181B，C2b保守记2MiB；上游C1+C2a保守2MiB及Lead468B另计，当前保守约4MiB/64MiB。cache新一代策略反例仍交D，不在C2b冒称修复。
+- C3写范围仅 `src/main/java/com/replaymod/render/utils/LwjglNativeWorkspace.java`、`src/main/java/com/replaymod/render/utils/Lwjgl3Loader.java`，以及已有Folders的native snapshot局部、FilesService纯JDK stale cleanup接入（后两份已有能力可不改）。不改EXRWriter算法/第三批资源包/视频/录制/cache/UI或构建依赖/其他资源。C3独立新C:/Temp/reforgedplay-C5-C3-*，建议样本≤16MiB（native拷贝计入）、单份≤4MiB；用当前MC声明core3.3.3与已打包TinyEXR3.3.1及对应现有native，不以缓存另一Java版本补运行依赖。
+- C3按15.3现有资源child-loader路线消除缺失embedded lwjgl.jar门：绝不静默去系统temp/cwd/home二次解包，不全局改属性，不从cache根加载/清理native。资源缺失/ABI不明具体失败，不签未跑的EXR；不以此阻断UI和D。尽量新JVM真实1×1 EXR写/读回并执行实际EXRWriter；若headless需先初始化parent native，所有该初始化仅在隔离harness、用独立已准备副本，和生产child配置前后是否污染分开记录。已加载native本进程不删，只在后继确认原PID/startInstant结束、锁和owner可信时清，未知保留。
+- C3完成后顺序C4设置页/两语言，最后D真实完整mc_gradle build＋已知反例修复和必要最终JAR生产回归；不额外重复wrapper、不改计划/仓库测试/实际配置/依赖、不装包/真游戏。
+- Lead在C3执行期间追加只读实源复核：已读实际RFO保护/发布、Marker完整保护闭合、Saving GUI worker/部分收据、Packet准入至finish核心及Connection启动。D再核一项明确新录制语义：ConnectionEventHandler当前仍以 `open(layout, outputPath, outputPath)` 打开时间命名的新录制（151–152行），若该work文件已存在，会被当编辑源授权替换。新录制必须选择不冲突名字/sidecar并以新目标输入null打开，最终发布仍由不覆盖原语裁决；不能借旧时间名碰撞覆盖既有完整回放或消费待恢复sidecar。此为本需求‘新录制不覆盖’直接相关，允许D在原Connection/RFO/Files白名单内最小修正和生产用例验证，不借机改其他网络录制行为。当前未动态复现，不把源码风险计成测试FAIL；不得忽略该调用语义。
+
+### 15.11 C3真实结果、EXR明确缺口与C4 UI
+
+C3 `2ccc1f75-0363-4268-835b-cf396291343d` 已完成：仅native workspace、loader、FilesService后台清理3行，共三源。Lead已读 [完整报告](<C:/Temp/reforgedplay-C5-C3-20261117-80d4f9/C3-report-final.md>)、实际loader139行，三源hash全部OK，status/差异白名单及diff --check核对通过；Folders未改。删除embedded-JAR前置和cache/native混用，native来自实际parent资源，child独立配置/file URL/显式禁止SharedLibraryLoader fallback，纯JDK进程owner/锁/stale清理闭合。
+
+- **实际生产EXRWriter不可用，不是‘仅未测’**：真实consume到EXRHeader.mallocStack时NoSuchMethodError；已用javap证实TinyEXR Java3.3.1调用Struct.wrap(Class,long)，MC core3.3.3已无此Java ABI。最后loader在consumer构造前具体拒绝，不崩到导出中/不生成假结果。要恢复exporter需要改变依赖或明确兼容适配范围，目前两者未授权，故此单项保留失败，不能宣称‘全部功能完成’。Lead已向用户明说此限制，未停掉其他目标。
+- 真实TinyEXR JNI的1×1写/读回通过，但harness绕开失配generated mallocStack而用真实nSave/nParse/nLoad；这是native ABI诊断，不是生产writer替代或PASS。最终真实Library日志指core绝对本任务路径、Tiny来自准备file URL，无SharedLibraryLoader加载、parent Config全部前后null/JVM Properties完全一致、cache哨兵不变。真实API编译和native源＋实际EXRWriter等编译均exit0。
+- 已测中文空格/空值/显式失败无回退/缺资源/伪binding/属性冲突拒绝、双JVM活跃隔离/后继结束清理、foreign/unknown/junction保留。cleanup JVM不加载org.lwjgl，加载native的JVM结束后可清精确task。实际launcher资源可见性、whole游戏/Linux/macOS/ARM仍未测；ARM仅拒绝分支。早轮ABI/平台log/Windows活锁/编码与seal失败证据都保留。
+- 全轮样本14,262,950B、最大479232B；C3保守16MiB，加此前4MiB＋Lead468B后保守20MiB＋468B/64MiB。C4建议≤1MiB，余量给最终D，不重跑C3整套复制更多native。
+- C4写范围固定四文件：现有GuiReplaySettings入口、拟新增GuiStorageSettings、en_US.lang/zh_CN.lang必要文案；保留六String/two Boolean键displayString=null，专用可滚动存储页/固定应用取消，初始路径和长路径不被默认textfield长度截断（先设足够maxLength再setText）；先草稿全校验再setAll/一次save，取消/Esc零set，raw关闭不探测其离线/非法路径并保留字符串。说明相对游戏目录/空值继承/任务快照、native本进程不随设置迁移、RAMDisk恢复风险，不自动搬/删历史数据。不要改后端、core协议、EXR依赖或其他GUI。
+- C4真实API编译＋实际页方法/设置bulk与必要语言键验证、headless边界单列；未跑真游戏不得签截图布局/交互通过。完成后直接D，D必须修验15.9 cache策略真反例和15.10新录制不覆盖语义，再mc_gradle build及最终artifact回归。
+
+### 15.12 C4 UI收据与最终D冻结入口
+
+C4 `655a742f-59a8-4e09-bc27-60a6aeed4891` 已完成四文件：现有主页入口/滚动列表、新专用GuiStorageSettings、两语言各追加22键。Lead已读 [完整报告](<C:/Temp/reforgedplay-C5-C4-20261117-197fb2/C4-report-final.md>)、实际页294行/主页138行及真实AbstractGuiLabel.draw换行实现，四源hash全OK、status/差异白名单/diff --check通过；八个存储键仍隐藏于旧通用循环，未改核心协议或后端。
+
+- 实际API javac exit0，生产UI/Registry/Backend/Layout方法headless323断言（19 cases）通过；真实TextField/滚动容器/composed键处理/事件，MC调度/字体渲染边界stub。初始八值/长中文空格路径、取消/Esc/removed/后台迟到零提交、raw禁用保非法字符串与零探测、整批callback/单次save、错误/回调异常/已有void后端IO只日志边界、两语言22键与几何小窗口范围均明确分层。不是实际字体/截图/鼠标/游戏验收。
+- 样本2820B、最大651B，保守记1MiB；全链当前保守21MiB＋Lead468B/64MiB，D建议≤32MiB（含native副本）、单份≤4MiB，留余量。旧各片证据只读，全部新输出到唯一D5目录，不扫描旧上万文件/覆盖失败证据。
+- **D先修两个已批准窄问题**：15.9/1312 cache新一代策略已有真实反例；15.10/1324新录制必须input=null且不碰撞/消费旧sidecar。只在现有23Java白名单内最小修，回归mixed活跃cache和新目标不覆盖；不能以‘未测’带过。其他发现的本需求明确bug可同白名单小修，不能重构无关系统。
+- **D唯一完整构建**仍是 `mc_gradle(projectDir="C:/Users/zhenz/Desktop/ReForgedPlay-1.21", task="build", args=["-Djava.io.tmpdir=C:\\Temp","--console=plain"], timeoutMs=1200000)`；不clean/refresh/-x test/额外Gradle任务/直接shell wrapper。在窄修之后构建，若失败只修必要项再重跑，不把失败compile或NO-SOURCE说成成功。真实工具输出保留，不能伪造未返回的exitCode等字段。
+- D需复验生产核心/录制raw/恢复cache/UI关键回归与最终non-dev-shadow JAR；至少真实最终JAR优先classpath跑纯核心，防旧classes遮盖。核对实际ReplayStudio依赖/新增类与语言/新Mixin target映射，区分静态/外部transform边界与真实NeoForge注入未测。已有Image/Full/Handler/Bridge/metadata/video保护源与构建/属性/wrapper/libs原字节保持；白名单23Java＋两语言＋plan，三项whale删除单列外部不恢复。
+- **EXR ABI已知失败必须保留明示**，不能升级依赖、patch生成LWJGL类或EXRWriter算法，更不能拿RawTiny JNI诊断PASS替代生产exporter。D若其他门全过，可交付普通格式/目录功能与明确EXR限制，不签全部格式通用。无真实游戏/物理RAMDisk/跨卷/满盘/卸载/断电和完整UI验收则如实列出。
+- D返回唯一REPORT、真实命令/日志/样本账、最终artifact路径/size/SHA256、完整实际diff（含六份新Java，排除whale内容）、最终源hash与已过/已知失败/安全拒绝/未测四栏。Lead复核后再交用户，不Git写/安装，控制面许可时结束目标并停止工作；没有物理删除历史目标工具不假称已删除。
+
+### 15.13 D5最终收据、Lead复核与交付停点
+
+**可交付的是目录/存储改造与普通格式的游戏测试候选，不是‘EXR已修复’或‘真实游戏全验收’。** D `33188c41-3c41-4bd0-9b8e-82ceca5dc8b6` 已完成，完整 [REPORT](<C:/Temp/reforgedplay-D5-20261117-6fa903/REPORT.md>) 与 [证据索引](<C:/Temp/reforgedplay-D5-20261117-6fa903/EVIDENCE-INDEX.md>) 保留原日志/所有失败轮。Lead已读两报告、实际D-only三源补丁、build工具原文本、artifact-cache策略原日志及runner事故记录，复核23Java＋两语言25项源hash全部OK、最终JAR实际hash/size和status/diff --check；没有再改实现或重复build。
+
+- 两必修项真实关闭：idle cache新一代按新ephemeral快照，ACTIVE混合代false用户仍保留优先；新录制选名跳过完整文件/sidecar并以input=null打开，最终仍不覆盖发布。D仅改ReplayCacheLease、FilesService窄选名helper、ConnectionEventHandler两行与import，没有借机改其他网络。源19修复用例及最终JAR12修复/来源断言、原反例最终JAR输出true/true/true通过。
+- 唯一授权构建：mc_gradle build，-Djava.io.tmpdir=C:\Temp，--console=plain；工具原文本 **BUILD SUCCESSFUL in 54s，6 actionable:5 executed/1 up-to-date**，compileJava/processResources/jar/shadowJar/remapJar执行。compileTestJava/test为NO-SOURCE，不冒充JUnit通过；既有Thread.stop/finalize、Loom/Gradle及WorldRenderer/JOML remap诊断原样保留，未顺手修。工具只提供text，未虚构额外exitCode/timedOut。
+- D当前源实跑：core60、边界19、cache36＋子过程5、设置15、恢复GUI方法41、录制/raw/RP/后台GUI126、UI323/19cases；冷进程恢复、跨进程锁通过。最终non-dev JAR在CP首位且无旧生产classes/本地Studio/MC stub遮盖的core60/边界19/cache36＋子5、修复12/冷恢复/锁通过。以上每层边界明确，不把各轮数字累成一个‘全游戏总PASS’。
+- 最终JAR实际loader/workspace/EXRWriter及真实Library/natives来源核验；JNI1×1仍通过、最终factory仍提前明确拒绝EXR Java ABI失配。六新class/两语言各22键存在，实际ReplayStudio public API与本地一致、dev-shadow class字节一致；最终remap字节不同不谎称hash相同。Mixin onAdd→pushNewPack/ServerPackData、onDownload→onDownload/BatchResult与patched Mojang descriptor静态匹配，未transform/未NeoForge实际注入。
+- 最终产物：[reforgedplaymod-1.21.1-0.3.1.jar](<build/libs/reforgedplaymod-1.21.1-0.3.1.jar>)，**17,619,307B**，SHA256 **047f493007096d23fd1142bf65eb2bd057eba8f0bef009cea88b53c59aca37b4**。HEAD仍fbd2c02756572b7ddae016452fc0535ac9538490，没有Git写或安装。实际修改23Java＋两语言＋本计划，其中六新Java不要漏入用户自己的提交；三项whale删除始终单列用户/外部状态，不恢复不读内容。539项保护文件原字节保持、既有Folders图片/lease/video前缀与HEAD一致。
+- D [完整实际差异](<C:/Temp/reforgedplay-D5-20261117-6fa903/complete-actual.patch>) 含六新Java/两语言及D起点plan；D-only三源补丁、25源hash和保护清单均在证据索引。Lead此后仅更新本计划的最终收据/状态，不改任何构建输入；最终交付以新 `C:/Temp/reforgedplay-Lead5-final-69a55ca3/complete-actual-final.patch` 为准，将plan片段更新为当前实际Git diff，原D patch不可覆写。该根FINAL-RECEIPT.json记录Lead新核验的25实现文件/539保护文件/JAR/完整26文件patch指纹，不冒充新增运行测试。
+
+**流程偏差，Lead负责原样披露，不以绿灯掩盖：** D首轮复制UI harness时，Windows反斜杠替换未改源码正斜杠绝对fixture常量，误输出旧 `C:/Temp/reforgedplay-C5-C4-20261117-197fb2/samples-r1` 子树，现存5份合成文件1407B。未有该子树执行前前像，不能证明此前不存在或从未覆盖fixture；没有删除/回滚/伪恢复，旧根不能再签‘完全未动’。D已在新唯一D根修正harness路径并重新323通过，首轮结果不计最终验收；不是生产源或JAR被误改的证据，但违反旧证据只读要求确实成立。事故详情见runner-incidents.json与样本账。B/D角色禁止技能工具的偏差也按实际记录，不冒称加载；实际版本/API核实另有证据。
+
+- 预算：D已知累计含误输出和清过native1,188,490B、最大479232B；不是全过程逐文件分配监控，内部成功临时删除另以D16MiB保守并账，全链保守 **37MiB＋468B/64MiB**。失败/recovery/unknown/保护材料保留，合法已结束native后继清理不是删除失败证据腾预算；Lead终检只写代码/patch/hash/文档，不新建合成录像样本。
+- 尚未覆盖：完整NeoForge启动/真实注入、游戏播放/完整网络consent、实际字体/截图/鼠标交互、launcher资源可见性、物理跨卷/RAMDisk/离线卷/满盘/卸载/断电、其他OS/ARM。硬链接/锁/原子替换能力不足安全失败保源，不承诺所有RAMDisk；原卷独占/可信父目录合同仍在。legacy无owner/旧读者证明的材料保守保留；异常constructor quarantine须退出JVM后恢复；歧义RP不猜归属。
+- 用户使用：关闭游戏替换唯一旧版mod，不用dev-shadow；回放列表的设置→存储设置，六目录/两开关可改。推荐cache/temp去已挂载RAMDisk，正式/raw/work/tmp先留稳定盘；关闭raw不删除历史备份、失败恢复材料仍保留。先用可丢弃短回放验证新UI/录制/播放/普通导出，不选EXR；EXR恢复需另定依赖/兼容授权，本轮未越权改库。
+- 收尾控制面：目标goal-69a55ca3-87df-4520-9f54-b3a2504a4988仍revision3、active/disarmed。Lead在本后台完成通知回合尝试complete，Host明确拒绝“complete and blocked require a direct human turn or the current goal round”。未反复重试、未擅自resume/新建重复goal，亦未假称已删除历史。当前无后台jobs/待执行子代理，代码工作到此停止；下一次直接人类回合可合法关闭该控制面记录。
+
+## 16. 纯客户端进服被要求服务端安装：只读诊断与待批准最小修复
+
+用户明确定位：本mod纯客户端，服务器不应因没装它而拒绝连接。本回合只读检查源、最终JAR及本机真实NeoForge21.1.82二进制，未改实现/依赖/metadata或重新build。工作区仍保留上批23Java＋两语言改动及三项whale外部删除；HEAD仍fbd2c027。当前get_goal返回null，不再向旧goal ID发动作、不新建长期目标。
+
+- 明确缺陷位于 [ReplayModRecording.java:74–78](<src/main/java/com/replaymod/recording/ReplayModRecording.java#L74-L78>)：`event.registrar("1")`后直接commonToClient注册`replaymod:restrict`，未调用optional。当前发给用户的non-dev JAR实际javap同样无optional调用，确认不是只读到源而成品另有行为。
+- 真实NeoForge21.1.82 universal.jar指定javap21证明：PayloadRegistrar构造把optional设为false；commonToClient将该值传给NetworkRegistry.register（同时覆盖PLAY/CONFIGURATION）；optional()返回带true的**新registrar**而非原地修改。因此该限制消息接收通道被声明为必选，会要求另一端支持；这是能解释‘服务端需要该mod’的实际错误。不能把没有用户本次握手日志说成已实际复现完整服务器连接。
+- metadata已有displayTest=IGNORE_SERVER_VERSION不等于网络通道可选；dependencies下side=BOTH表示依赖生效侧，不是本问题应随手改成CLIENT的开关。不通过移除限制通道/codec或让服务器装客户端mod来掩盖问题。
+- **待批准白名单只有两文件**：本计划，以及 `src/main/java/com/replaymod/recording/ReplayModRecording.java` 的registrar一行：`final PayloadRegistrar registrar = event.registrar("1").optional();`。commonToClient、ID、CODEC、handler、协议版本及其它初始化全部保持；不动本轮存储/GUI、EXR、metadata、依赖/构建/wrapper、测试/真实配置、服务器或任何其它源码。不Git写、不安装到游戏目录。
+- 批准后由Lead直接完成此单行修复，不再开启大型四阶段链；验证真实21.1.82 default/optional返回值与成品optional→commonToClient顺序，再通过唯一mc_gradle build（固定-Djava.io.tmpdir=C:\Temp --console=plain）并提供新JAR/真实差异/指纹。此回合没有运行新构建或虚构进服通过；最终仍需用户同一服务器实际重连验收，如果还有其它通道则依据实际截图/实例日志继续定位。
+- 补充审计发现：本工作区现有 [logs/latest.log](<logs/latest.log#L1-L16>) 明确是D5 headless故障注入日志（C2bProbe、HEADLESS mc.send rejected和D5合成路径），不是用户本次进服日志，不可拿它判断用户服务器报错。它表明旧D探针的Log4j也曾随cwd写入被Git忽略的workspace日志；15.13的539源/构建保护核对不覆盖这些ignored日志，不能扩大成‘旧workspace全部没写’。本次未删除/覆盖它；后续新探针必须在新唯一CTemp cwd并收敛日志到该根/console，避免重演输出越界。
+
+### 16.1 用户批准与实际实施起点
+
+用户通过确认工具选择“执行最小修复 (Recommended)”，批准本节两文件范围。Lead已仅将registrar一行改成链式.optional()，保留返回的新对象；其余网络ID/codec/handler/协议和全部存储/UI实现不动。验证在新唯一C:/Temp/reforgedplay-client-channel-20261118-4a98c1进行，原D/Lead证据根不写，所有非Gradle探针cwd也固定该新根，避免Log4j再落项目日志。此段是实施起点，尚未签构建或真实服务器连接通过。
+
+### 16.2 单行修复构建与成品收据
+
+- 真实NeoForge21.1.82 universal.jar由独立URLClassLoader加载（parent仅JDK platform，不是mock），四项动态断言通过：默认required、optional返回新对象、新对象optional=true、原对象仍required。探针和日志只在本新CTemp根，未调用服务器握手；MethodHandles仅外部测试读取状态，不进入生产。
+- 专用mc_gradle按既定两参数执行唯一build：**BUILD SUCCESSFUL in 22s，6 actionable:4 executed/2 up-to-date**。test为NO-SOURCE，非JUnit成功；既有Loom/PacketListener unchecked与WorldRenderer/JOML remap诊断未顺手改。工具原文本在本回合实际调用，不虚构独立exitCode字段。
+- 最终JAR实际javap确认registerNetwork中.optional调用先于commonToClient；ID/CODEC/handler不变。源码按原字节反向撤销仅该替换后SHA恰等于D5旧保护hash，证明不是夹带其他源码修改；D5此前25份生产/语言源hash全部一致，另538份保护文件仍一致。git diff --check通过，未Git写或安装。
+- 新产物仍为 [reforgedplaymod-1.21.1-0.3.1.jar](<build/libs/reforgedplaymod-1.21.1-0.3.1.jar>)，**17,619,331B**，SHA256 **4df462cb5843599418f8781a4e0e599a07229bbdd5ffcadc938aacfeeec3ee3d**。本次重构建按批准覆盖同名build输出；上批D5旧hash是历史收据，不再拿当前链接文件冒充旧产物。目录/GUI功能字节来源保持，EXR已知不兼容仍未修。
+- 新证据根的verification.json、registrar-probe.log、artifact-network-javap.log、network-only.patch与REPORT.md保存本轮收据；最后plan-only.patch为本计划当前真实差异。没有真实游戏或用户目标服务器连接测试，不把编译/注册器验证说成已实际进服；交用户关闭客户端、替换唯一旧JAR并重连原服务器，若仍拒绝需实际断开界面/游戏实例日志识别其他问题。当前无长期goal、未新建大型代理任务。
+
+## 17. 用户新报保存录像超时：诊断及待批准的最小修复
+
+本轮用户要求读取放在工作区的错误信息。已读取 [用户报告](<crash-2026-11-17_18.15.24-client.txt#L5-L10>)，直接错误是 `Recording writer/main admission did not drain within 10 seconds; retaining recovery`，出自PacketListener.finishRecording第372行；不是服务端缺mod/握手报告。第16节optional修复不能解决本次保存错误，不用那份注册器验证替代本次诊断。当前仅追加计划，未改生产源、旧JAR、真实录像、配置或仓库测试，未构建。
+
+### 17.1 已核查事实与证据边界
+
+- [PacketListener:166–199](<src/main/java/com/replaymod/recording/packet/PacketListener.java#L166-L199>)先增加pendingMain再用mc.send投递，只有实际执行或投递抛异常才归还票据。mc.send正常返回、随后队列被清空时，claimed/rejected均不会执行，pendingMain不会归零。
+- [PacketListener:241–263](<src/main/java/com/replaymod/recording/packet/PacketListener.java#L241-L263>)最终metadata也经mc.send；若该任务静默丢失，saveService.shutdown永远不会发生。两处都能造成当前worker等待超时，即使没有任何磁盘写入错误。
+- [SchedulerImpl:53–58](<src/main/java/com/replaymod/core/versions/scheduler/SchedulerImpl.java#L53-L58>)已有明确说明：MC断开连接会清空自身任务队列，ReplayMod自有executor正是为避免丢失录制收尾任务而存在。core.runLater通过该独立executor排队，InputReplayTimer每帧调用core.runTasks，用户报告第35–43行也有这条独立调度调用栈。
+- 不仅依赖注释：用JDK21 javap读取当前工程实际named MC1.21.1/NeoForge21.1.82缓存JAR，[真实字节码](<C:/Temp/reforgedplay-save-diagnosis-20261118-7c8d21/mc-scheduler-javap.log#L5626-L5636>)确认disconnect(Screen,boolean)调用cancelTasks；[ThreadExecutor](<C:/Temp/reforgedplay-save-diagnosis-20261118-7c8d21/mc-scheduler-javap.log#L8522-L8561>)确认send只入队，cancelTasks直接Queue.clear，不调用被丢弃Runnable。新取证均在唯一CTemp根；源码JAR只有NeoForge源，不含MC源，首次按Yarn路径提取失败日志如实保留，随后改查实际二进制成功，不伪称读到了MC源码。
+- 因此已确认一个本轮录制改造引入、可以直接导致该症状的队列生命周期缺陷。报告本身没有pendingMain/finalQueued/worker栈等快照，不能仅凭此确定用户那一次卡在普通票据、最终metadata还是慢磁盘；实际运行NeoForge21.1.264，而工程仍钉21.1.82，不擅自升级。未把动态光源的附加CrashReport段归罪为根因，也没有据此判断录像已损坏或恢复成功。
+
+### 17.2 候选实施白名单、验证与停点（等待用户确认）
+
+- 仅修改本计划及 [PacketListener.java](<src/main/java/com/replaymod/recording/packet/PacketListener.java>)。两处非主线程调度由mc.send改为现有core.runLater：dispatchMain及queueFinalMetadata；仍在主线程时直接执行。同步更新该文件与mc.send直接相关的局部注释，不重构Scheduler、准入/packet引用计数、资源包、事务存储、UI、网络注册或依赖。第16节optional暂保留，不能因无关保存报告盲目撤销它。
+- 不延长10秒阈值、不删超时报错、不强行shutdownNow、不假定任务已执行后手减pendingMain；保留真实排空、最终metadata先写后shutdown、首次错误和失败保源机制。新调度必须继续满足每份已接受票据/packet恰好归还一次，最终metadata只提交一次，主线程不等待worker。
+- 批准后在新唯一CTemp根做隔离生产方法回归，显式模拟“投递成功后MC原队列被清空”两种窗口（普通已接受票据、最终metadata），不是只覆盖投递抛异常；同时验证主线程内联、重复inactive、调度拒绝/写入失败保源等必要原行为。边界mock/真实MC二进制验证分开标注；不修改仓库测试、不使用游戏真实录像当样本，不向旧证据根或项目logs输出探针日志。
+- 最后只通过mc_gradle执行build，参数固定 `-Djava.io.tmpdir=C:\Temp --console=plain`，不clean/refresh/-x test/额外任务/直接shell wrapper。交真实局部diff、构建原输出、新JAR指纹与未测项；游戏内短录制→退出服务器→正常保存仍由用户验收，编译不等于通过真实游戏。EXR已知不兼容不在此修复范围，不Git写/装包/安装mod到游戏目录。
+
+### 17.3 用户批准及实施起点
+
+用户通过确认工具选择“执行最小修复 (Recommended)”。Lead按两文件白名单实施：PacketListener两个非主线程分支改为core.runLater，更新两处旧mc.send注释并明确断线队列风险；没有改准入票据、阈值、writer/保源/close算法或第16节网络注册。新隔离根仍是本回合唯一CTemp目录，修改前对src/构建/wrapper/libs及用户报告/原workspace日志共566个文件记录hash，后续逐项核对。仅复制旧D5的明确flow测试源码和边界stub到新根，未运行或写入旧证据；新副本将原先混成一个队列的MC/ReplayMod调度stub分为独立队列，专门补静默清空窗口。此段不是测试/构建已通过收据。
+
+### 17.4 完成收据及真实边界
+
+- 局部 [实际diff](<C:/Temp/reforgedplay-save-diagnosis-20261118-7c8d21/recording-only.patch>) 相对本次修改前：只有两个非主线程调用由mc.send改core.runLater，外加三处相关注释变更；该外部快照用于明确本轮差异，不把对HEAD的累计存储改造diff冒充本轮小修。
+- 旧生产代码的两个动态反例均成立：普通packet/marker/metadata票据在MC队列清空后永久滞留，以及pendingMain=0但final metadata被清空导致executor永不shutdown。新生产代码在相同显式双队列边界下分别17/16项通过（各含1项fixture初始检查），metadata/marker从实际发布的MCPR读回，packet引用仅消费一次，真实writer终止和close收据成立；不把两个数字合成全游戏统计。
+- 原flow安全回归新副本完整126断言通过、进程exit0：[原始成功日志](<C:/Temp/reforgedplay-save-diagnosis-20261118-7c8d21/after-flow-regression-r5.log>)。真实10秒超时/中断/写失败/close失败仍保源，正常/minimal/重复inactive/资源包/raw-off/部分发布等保持。MC调度/GUI为显式headless边界；生产PacketListener与存储算法、ReplayStudio真实，实际MC取消语义另外由精确JAR字节码核验，未做完整NeoForge注入/用户游戏运行。
+- **构建工具实际输出：BUILD SUCCESSFUL in 24s，6 actionable:4 executed/2 up-to-date。** 唯一mc_gradle build使用固定两参数；test仍NO-SOURCE，不是JUnit成功。既有Loom、unchecked与WorldRenderer/JOML remap诊断保留，没有升级依赖或顺手修复。
+- 新non-dev [JAR](<build/libs/reforgedplaymod-1.21.1-0.3.1.jar>) **17,619,316B**，SHA256 **08abad21bd91b09427fa0b32a25f75735fd9916c39854e76b6d990fde24a7058**。实际成品javap确认dispatchMain/queueFinalMetadata调用core.runLater且无send，第16节optional调用仍在；ZIP校验通过。PacketListener源SHA256 **5f5737959ce77098f974b2c5471bd3604c9e8bb7769d224bddd8aa409636b02a**；其余565保护项hash未变（包括用户报告及旧workspace日志），本回合不Git写、不安装、不碰真实录像或配置。当前同名JAR覆盖上轮产物，历史第16节hash不再代表当前文件。
+- 本轮测试启动问题如实保留：首次外部javac自动运行Mixin处理器缺映射，之后仅探针使用-proc:none；javac的-J参数先误放argfile，修正到命令；Java CP超过Windows长度后改Java argfile。合并回归前景命令120秒被终止，r4完整flow停在52项不计通过，后来独立r5新样本根完整126项通过；未覆盖旧失败/中断日志或向旧D5/C2b证据根输出。最早MC源提取路径不存在，已改以实际二进制为证，不伪称MC源码。详见 [报告](<C:/Temp/reforgedplay-save-diagnosis-20261118-7c8d21/REPORT.md>) 和外部probe收据。
+- 新根当前合成样本（含中断/失败及game索引）281文件共80,039B、最大2208B；不是全过程分配监控，不以删除失败材料清预算。原D5边界stub曾将core.runLater映射同一mc.send且只测throw拒绝，漏掉静默清空真实窗口，是上轮验证缺口，不能拿旧126通过证明本次没有bug。
+- 尚需用户以新JAR实际短录制→退出服务器→保存验收；用户那次错误具体栈缺口和NeoForge21.1.264运行差异仍未作真游戏验证。不要删除这次失败录像的tmp/恢复材料，本次没有自动修复它们。EXR原不兼容仍不在范围。本轮源改/构建到此结束，无后台job或子代理待收。
+
+## 18. 未改选项保持默认；服务器录像加载报网络协议错误（只读核查与待确认方案）
+
+用户新要求“所有选项在没更改的时候保持默认”，并报告加载服务器录像后出现网络协议错误。当前只核查源码和已有日志、追加本计划，未改任何生产源或实际游戏配置、未重新构建。不得因为一句通用错误再次猜测是必选网络通道或要求服务端安装本客户端mod。
+
+### 18.1 默认值及候选最小修改
+
+- [Setting.java:5–12](<src/main/java/com/replaymod/core/Setting.java#L5-L12>)当前默认：正式录像`./replay_recordings/`、cache`./.replay_cache/`、temp/raw/work/tmp字符串为空；ephemeralCache=false、rawBackupEnabled=true。[布局:30–36](<src/main/java/com/replaymod/core/files/ReplayStorageLayout.java#L30-L36>)将空raw/work分别继承正式目录的raw/recording，空temp交现有默认分支，空tmp使用既有任务工作区选择；没有默认启用RAMDisk或关raw。内部owned workspace/恢复索引是既有安全设计，不应把“默认目录不变”扩大成“物理临时目录树与上游一字不差”的未经验证承诺。
+- [存储UI:181–210、225–253](<src/main/java/com/replaymod/core/gui/GuiStorageSettings.java#L181-L253>)目前即使没改也校验全部八值、setAll整批并save；[setAll:61–79](<src/main/java/com/replaymod/core/SettingsRegistry.java#L61-L79>)亦对相同值发回调。尚无证据表明打开UI会把默认值改成非默认；已确认的是无变化Apply仍有校验/通知/写盘副作用，不能混称默认值本身错误。
+- 待用户确认按本次新增存储选项理解：未自定义继续原有默认/空值继承，不把解析的绝对路径写回设置；已有自定义配置不重置、不迁移。页面未改或改回初始值后Apply不提交、不save、不进行路径IO；有改动只提交真正改过的项，完整布局校验用当前未改值合并本次改动，避免页面旧草稿覆盖外部已更新的未改项。取消/Esc及raw禁用不解析raw等原合同保持。若需要对所有旧录制/渲染设置统一改变保存语义，须先明确，不能借此全面重构设置系统。
+- 候选生产白名单优先仅 [GuiStorageSettings.java](<src/main/java/com/replaymod/core/gui/GuiStorageSettings.java>) 与本计划；确有必要的提示文案才申请两语言追加。暂不改SettingsRegistry/Backend、默认常量、布局/事务核心、播放/录制协议、依赖或真实配置。确认后才实施并用新唯一CTemp根隔离验证未改/改回默认/单项改动/外部更新/取消及原raw-off边界，再按固定mc_gradle build命令构建，不把方案当已实现。
+
+### 18.2 播放协议错误：当前缺少直接证据
+
+- 当前工作区根没有新错误截图/游戏日志/MCPR；以前那份保存超时crash文件也已不在，本轮不恢复或借旧内容代替新报错。工作区 [logs/latest.log:1–8](<logs/latest.log#L1-L8>)仍明确是旧D5合成探针日志（HEADLESS mc.send rejected、C2bProbe及CTemp样本），不是用户回放播放日志，不能用它诊断本次异常。
+- [ReplayHandler:362–395](<src/main/java/com/replaymod/replay/ReplayHandler.java#L362-L395>)播放通过本地ClientConnection/EmbeddedChannel驱动；“网络协议错误”界面本身不能证明真实服务器网络/服务器需要本mod。[FullReplaySender:590–605、608–684](<src/main/java/com/replaymod/replay/FullReplaySender.java#L590-L684>)涉及LOGIN/CONFIGURATION/PLAY状态及custom payload过滤，错误可能落在解码、注册表/模组payload或录制内容等不同层面，目前均未定位，不选一种当根因。
+- 请用户在实际游戏实例复现打开录像失败后，把该实例的latest.log另取名如replay-playback-latest.log放工作区，同时给完整错误截图；说明录像是新修复版录的还是旧录像、录制与播放Minecraft/模组环境是否相同。优先日志中的最早异常和Caused by，不只看最后“network protocol error”；必要时才请求最小失败MCPR样本，仅读取副本、不改唯一原件。
+- 协议修复范围尚未确定、未获生产修改授权。拿到直接证据后提出精确白名单和验证方案；不全丢custom payload、不跳过注册表/握手检查、不吞异常伪装能播，不擅自升级NeoForge/ReplayStudio，不删旧录像或恢复材料。默认值小修与播放兼容诊断分别验收。
+
+### 18.3 用户批准设置修改；新日志到达
+
+用户确认“按这个方案修改”，并说明latest在工作区、录像是新的。现根目录 [latest.log](<latest.log>) 已出现，原字节GB18030而非UTF8，已在唯一新根`C:/Temp/reforgedplay-defaults-playback-20261118-b2741c`无损转换UTF8副本（替代字符0，原SHA256=e3bb8a418f3c8c4004c32afaec92bb3efeab40ece560b06c21bfde80fd226428），未改用户原件或旧workspace日志。该根保存566项修改前hash和仅为本轮diff准备的UI源前像；只复制明确旧UI探针/stub文本，路径全部改指新根，不运行旧证据。Lead仅实施已批GuiStorageSettings源改；其他源码仍未授权。只读子代理2f5a1dc8-87e0-4f5e-a08e-767ff9573fd4独立分析协议异常，不写plan/源码或执行构建。
+
+- 新日志949打开18_52_30.mcpr，989–995最早回放异常为`An objective with the name 'commons' already exists!`（ClientboundSetObjectivePacket→handleAddObjective→Scoreboard.addObjective）；1022–1024进入onPacketError/storeDisconnectionReport，1040为网络协议错误。原始日志编码按副本保留原行号。列表FileLockedException来自别的后台预览读取，暂分开分析，不把它等同于协议异常根因；重复计分项的来源仍在查。
+- 设置实施细化仍仅页面：保存打开时八项初值，Apply筛出相对初值确实改过且当前尚未是目标值的项；空变更直接返回父页，零路径IO/通知/保存。有变化以当前其他存储值合并校验，回主线程提交前核对校验基线仍一致，异步期间外部修改则不提交并提示重试，防已校验组合过期；最终setAll只带真实变化项。保持原有raw禁用不探测、取消迟到零写、完整批次及错误语义。
+- 两语言旧文案出现“八项已生效/All eight values”等，改为部分提交后不再准确；若要修这些文案，须额外确认只改相关现有提示，不借机更改语言其他内容。当前不越权写两语言。
+
+### 18.4 设置功能已验证构建；当前可交付范围
+
+- 本轮生产范围仅GuiStorageSettings.java（未改默认常量、Registry/Backend、语言或播放源码），[真实本轮差异](<C:/Temp/reforgedplay-defaults-playback-20261118-b2741c/defaults-only.patch>)。原源动态反例确认无变化Apply仍提交八项/save；修改后新增默认行为59断言/10cases、原UI安全回归323断言/19cases均exit0。MC/字体/按钮边界明确为stub，UI/Registry/Backend/layout/textfield方法真实，不是全游戏验收。探针只在新根运行，不改仓库测试或旧证据。
+- 新增验证覆盖默认/自定义原值不重置、编辑后还原零写、raw默认开/cache即时清理默认关、空值继承不写绝对路径、真正单项提交/回调、外部未改字段不被覆盖、校验过程中外部改变拒绝过期提交及重试。原取消/Esc/迟到/raw-off/类型/布局/回调及save错误回归保持。
+- 首轮外部探针runtime CP漏原项目证书资源，Utils静态初始化报Missing input stream；r1日志保留。r2补入现有src/main/resources并同旧D5方法编译实际TextField源码后完成验证，未为此改生产代码/依赖或假称首轮PASS。
+- 工具真实完整构建：**BUILD SUCCESSFUL in 45s；6 actionable tasks:4 executed/2 up-to-date**，固定mc_gradle build及-Djava.io.tmpdir=C:\Temp --console=plain。test仍NO-SOURCE；既有Loom/unchecked/WorldRenderer/JOML诊断未顺手修。最终JAR ZIP完整性及实际javap核对新初值/no-op逻辑和先前core.runLater/optional修复仍在。
+- 当前 [设置修复JAR](<build/libs/reforgedplaymod-1.21.1-0.3.1.jar>) **17,619,892B**，SHA256 **5fbc5d4cbd2cc3b7a8fdc076b3183623a51f7a0f8f07bd72ef0532787de7372a**；UI源SHA256 **7cb45c379e36055ddaf81fc5e43f193901d6e1e37e6cd7fb08f2ec6a273563fa**。565项目保护文件hash不变（含用户根latest与旧workspace日志），本计划单独更新，Git仅status/diff。更早同路径JAR收据是历史，不冒称当前文件仍有旧hash。完整 [设置报告](<C:/Temp/reforgedplay-defaults-playback-20261118-b2741c/REPORT-UI.md>) 与receipt-ui-final.json保留边界。
+- 文案追加确认被中断，没有可靠批准结果；因此两语言未改，旧计数措辞仍是已知提示瑕疵，不假称修好。设置功能可交付测试，真实游戏UI尚未验收；**本JAR未修回放计分项异常**。EXR原不兼容仍未改。
+
+## 19. 回放协议错误：已确认重复计分项；候选最小兼容（待用户批准）
+
+### 19.1 已查实的直接原因与生成源边界
+
+- 只读子代理最终报告已收，Lead已读取原始 [逐包序列](<C:/Temp/reforgedplay-defaults-playback-20261118-b2741c/diagnosis-agent/verified_packet_sequence.json#L175-L223>)。两份失败原始MCPR由标准库ZipFile只读分析，不调用ReplayFilesService/ZipReplayFile/游戏，不改用户录像或配置。
+- 18_52_30的第50/370帧（0基），偏移143400/265151；18_54_50的49/363，偏移143202/260436：各有两份完全相同的SET_OBJECTIVE(0x5e)、mode0、名字commons，均时间0；其间没有该objective REMOVE或重配置/新GameJoin。这是文件自身的重复创建，不必假设播放sender同帧双投递。用户实际MC/NeoForge21.1.264字节码的mode0直接addObjective，重名抛异常；日志随后进入onPacketError和disconnect.packetError，直接解释网络协议错误。
+- 裁剪生成路径有可解释风险：MarkerProcessor前导cutFilter输出统一写t0；部署SquashFilter没有Objective专门处理，unhandled保留它们，JoinGame只清部分world状态并覆盖JoinGame包，因此可形成失去原边界却保留重复ADD的序列。但本次生成根因未有裁剪前raw对照，不把该机制假设签为已确认录制错误；不擅改ReplayStudio依赖或用户旧录像。认证/皮肤401/DNS、列表FileLocked和错误报告R盘异常不冒充该计分项触发原因。
+
+### 19.2 候选修复、白名单与验证门
+
+- 先提供播放已有录像的局部兼容，不重写文件：新增一个回放专用ClientPlayNetworkHandler计分项处理Mixin，并仅在当前本地回放连接、主线程、objective CREATE且同名已存在时替换旧同名objective后继续原版创建。真实联机、非CREATE、首次创建、不同名字及其他异常保持原行为；不硬编码commons、不全清scoreboard、不跳过所有custom payload或异常。移除旧同名会同时重置其旧分数/显示槽，必须对后续分数/显示包恢复及回退重播做验证，不能只以不崩溃当成功。
+- 候选新增 `src/main/java/com/replaymod/replay/mixin/Mixin_ReplaceDuplicateReplayObjective.java`，仅必要注册 `src/main/resources/mixins.replay.replaymod.json`，加本计划。该JSON是模组资源Mixin清单，明确申请单独许可，不把禁止改真实配置偷换为可随意改所有配置。可选同时把两语言已指出的计数提示改为“更改项已更新”，仅这些现有提示；两语言也需明确批准。
+- 此段只是候选，尚未触碰播放源码/清单。批准后先核对本工程named API与实际264对应签名、Mixin实际主线程边界和回放连接归属；若最小hook无法安全区分当前回放，停止扩大修改并报具体问题。完成时逐层区分实际Mixin变换、生产方法隔离测试和真实游戏未测，实际编译/构建必须成功。
+- 验证首创/重复创建/UPDATE/REMOVE/不同名字、分数与显示槽、重播回退/连接切换及真实联机不受影响；两份真实失败文件仅用只读数据或隔离副本，不写原件、不自动清锁。后续若修生成源，需单独确认raw对照和MarkerProcessor最小范围，不纳入本候选偷偷做。
+
+### 19.3 用户追加disconnect报告
+
+已实际读取新 [disconnect报告:4–12](<disconnect-2026-11-18_16.22.14-client.txt#L4-L12>)：时间2026-11-18 16:22:14，异常同为commons objective已存在，Scoreboard.addObjective→ClientPacketListener.handleAddObjective→ClientboundSetObjectivePacket.handle。[29–38行](<disconnect-2026-11-18_16.22.14-client.txt#L29-L38>)明确入站minecraft:set_objective、不可跳过、onPacketError/storeDisconnectionReport；线程Render thread，协议play/CLIENTBOUND。它与前一份11月17日日志是同类直接错误，不谎称时间不同的两报告是同一次事件。报告的动态光源附加段和java.io.tmpdir ERR不改变最早重名异常的直接因果链。无需再索取同一disconnect信息，原件仅读未改；19.2兼容候选仍待批准。
+
+### 19.4 用户已批准“继续修复并验证”；A阶段精确实施计划（2026-11-18）
+
+#### 19.4.1 授权、时代和当前保护基线
+
+- 用户已通过ask_user_question明确批准“继续修复并验证”。此批准覆盖下表的最小兼容及计数文案，不再等待每个小步骤批准；19.1–19.3的“待批准”是历史状态，本节接续为已批准。**严格A完成→B完成→C完成→D完成，后续阶段不得并行。A本轮只追加本节，不修改生产文件，不编译、不测试、不构建。** Windows大小写等价，继续使用本 [plan.md](<plan.md>)，绝不另建PLAN.md。
+- A先读 [构建](<build.gradle#L1-L11>)、[属性](<gradle.properties#L6-L20>)、[wrapper](<gradle/wrapper/gradle-wrapper.properties>)、[元数据](<src/main/resources/META-INF/neoforge.mods.toml>)、[现有vendored库](<libs/ReplayStudio-master-SNAPSHOT-slim.jar>)及相关源树：固定 **MC1.21.1 / NeoForge21.1.82 / Java21 / Gradle8.8 / Architectury Loom1.7-SNAPSHOT（既有实测解析1.7.435）/ Yarn1.21+build.1＋NeoForge patch1.21+build.4**。这是既有现代Java21 Loom工程，不是待scaffold项目；不升级，不套新模板，不迁移ModDev，不改映射/依赖/构建/wrapper/元数据。
+- 已实际加载 [minecraft-java-build技能](<C:/Users/zhenz/.dsh/profiles/desktop/node_modules/minecraft-dev/assets/skills/minecraft-java-build/SKILL.md>) 与 [minecraft-neoforge-mod技能](<C:/Users/zhenz/.dsh/profiles/desktop/node_modules/minecraft-dev/assets/skills/minecraft-neoforge-mod/SKILL.md>)，并先查其 [API参考](<C:/Users/zhenz/.dsh/profiles/desktop/node_modules/minecraft-dev/assets/skills/minecraft-neoforge-mod/references/api/mod-bus-events.md>)。参考覆盖事件/注册而无本次MC scoreboard/连接/Mixin API；缺项按用户要求用精确本地JAR及 **C:/Program Files/Java/jdk-21.0.12.1/bin/javap.exe** 补核，不拿新模板的21.1.249/ModDev API代替本工程。未新增任何依赖坐标。
+- A只读实测 [UI源](<src/main/java/com/replaymod/core/gui/GuiStorageSettings.java>) SHA256仍为 **7cb45c379e36055ddaf81fc5e43f193901d6e1e37e6cd7fb08f2ec6a273563fa**；[当前non-dev JAR](<build/libs/reforgedplaymod-1.21.1-0.3.1.jar>) 仍 **17,619,892B / SHA256 5fbc5d4cbd2cc3b7a8fdc076b3183623a51f7a0f8f07bd72ef0532787de7372a**。59＋323设置隔离断言及45秒build是18.4历史收据，不是本次objective已通过；当前JAR尚无此兼容。既有全部源改保持，不借累计Git diff撤销或重写；Git仅status/diff/log（含diff --check）。已观察到的.whale-craft三删除是用户外部状态，不恢复、不删除、不修改。
+
+#### 19.4.2 精确文件白名单与顺序所有权
+
+| 文件 | B：框架 | C：内容 | D：审查/验证 |
+|---|---|---|---|
+| 新增 `src/main/java/com/replaymod/replay/mixin/Mixin_ReplaceDuplicateReplayObjective.java` | 只建一个ClientPlayNetworkHandler Mixin，核实后的shadow/注入框架；空主体明确为未实现，不能当修好 | 补当前回放连接身份门、CREATE重名局部移除；必要自有窄helper只能在此Mixin内 | 只准本文件的小编译/映射修正及同范围缺陷修正；不得新建其他生产类 |
+| [mixins.replay.replaymod.json](<src/main/resources/mixins.replay.replaymod.json>) | 仅client数组加一次新Mixin类名 | 通常不再改；不能扩展到其他Mixin/插件/全局compatibilityLevel | 检查实际打包注册一次、目标及映射正确 |
+| [en_US.lang](<src/main/resources/assets/replaymod/lang/en_US.lang#L367-L370>) | 不改 | 仅下文三类key中的计数词；实际英文仅callbackFailed含All eight values | 核对仅指定词组变化、占位符及未确认落盘语义不变 |
+| [zh_CN.lang](<src/main/resources/assets/replaymod/lang/zh_CN.lang#L367-L370>) | 不改 | 仅applied/callbackFailed/saveFailed三处“八项”→“更改项” | 同上 |
+| [plan.md](<plan.md>) | 追加B交接，未完不签成功 | 追加C交接、实际语义/限制 | 追加原始验证结果、构建/产物指纹/未测项 |
+
+白名单总计一个新Java＋一个既有Mixin清单＋两个既有语言文件＋本计划。表外所有生产文件（特别是 [ReplayHandler](<src/main/java/com/replaymod/replay/ReplayHandler.java>)、[FullReplaySender](<src/main/java/com/replaymod/replay/FullReplaySender.java>)、[QuickReplaySender](<src/main/java/com/replaymod/replay/QuickReplaySender.java>)、[MarkerProcessor](<src/main/java/com/replaymod/editor/gui/MarkerProcessor.java>)、[设置UI](<src/main/java/com/replaymod/core/gui/GuiStorageSettings.java>)）、其他资源/仓库测试/真实配置/.env/依赖/build脚本/wrapper/libs均只读。D的唯一授权build可正常生成/覆盖build输出，不表示可手工改构建文件或安装JAR到游戏。需要新accessor/额外生产类/其他Mixin/改sender或生成源时先停报，不静默扩大范围。
+
+文案精确约束：仅 `replaymod.gui.storage.applied`、`replaymod.gui.storage.callbackFailed`、`replaymod.gui.storage.saveFailed` 这三类现有key。中文三处只替换前述词；英文callbackFailed只将“All eight values”替换为“Changed values”。英文applied/saveFailed现无八项计数，保持原样；不为了凑六行修改其他词。所有%s、回调失败/保存调用错误、仅请求save而非磁盘写入收据语义原封不动。两语言hint.tasks虽仍提八项，但不在本次授权三类内，**不顺手改**，记录为残留文案限制而非声称全页文案已统一。
+
+#### 19.4.3 已核验API、主线程注入和连接强归属
+
+核验日期均为2026-11-18。A用指定JDK21执行只读javap，cwd=C:/Temp，输出仅工具返回，没有运行旧脚本、构建或测试，也未创建外部取证文件。
+
+1. 编译API的精确来源是 [实际named MC1.21.1/NeoForge21.1.82 JAR](<C:/Users/zhenz/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/neoforge-21.1.82-minecraft-merged/1.21.1-loom.mappings.1_21_1.layered+hash.426444933-v2-neoforge-21.1.82/neoforge-21.1.82-minecraft-merged-1.21.1-loom.mappings.1_21_1.layered+hash.426444933-v2-neoforge-21.1.82.jar>)，不是intermediary或只凭Yarn网页。`ClientPlayNetworkHandler.onScoreboardObjectiveUpdate(ScoreboardObjectiveUpdateS2CPacket):void`：偏移6首先调用 `NetworkThreadUtils.forceMainThread(Packet, PacketListener, ThreadExecutor):void`，偏移15取mode，mode0分支49调用Scoreboard.addObjective；mode1/2分别remove/update。packet公开 `getName():String`、`getMode():int`；`ADD_MODE=0 / REMOVE_MODE=1 / UPDATE_MODE=2` 已用javap -constants核验。Scoreboard公开 `getNullableObjective(String):ScoreboardObjective`、`removeObjective(ScoreboardObjective):void`。handler持有 **private final Scoreboard scoreboard**；新Mixin可在自己内部精确 `@Shadow @Final` 此字段，操作与原版同一board，不转而用可能已切换的全局world scoreboard。
+2. B首选唯一注入点：目标完整descriptor为 `onScoreboardObjectiveUpdate(Lnet/minecraft/network/packet/s2c/play/ScoreboardObjectiveUpdateS2CPacket;)V`；在 `Lnet/minecraft/network/NetworkThreadUtils;forceMainThread(Lnet/minecraft/network/packet/Packet;Lnet/minecraft/network/listener/PacketListener;Lnet/minecraft/util/thread/ThreadExecutor;)V` 的 **INVOKE之后（At.Shift.AFTER）**，非cancellable、不捕获局部变量，`require=1 / expect=1 / allow=1`，保留正常remap，不用require=0掩盖漏注入。forceMainThread实际字节码：非主线程先executeSync再抛OffThreadException，只有主线程正常返回；所以回调不会在Netty线程第一次调用时提前移除。C仍加显式mc.isOnThread检查，不在HEAD先改board，不吞OffThreadException，不再投一份packet/手动执行原版创建。
+3. **强归属必须是多重对象身份门，不是global replayHandler!=null：** 取得本注入handler自身（不是用当前handler替代注入对象），要求mc.getNetworkHandler()与此对象 `==`；它自身getConnection()非空且getPacketListener()与此对象 `==`；从该connection经既有 [NetworkManagerAccessor.getChannel](<src/main/java/com/replaymod/recording/mixin/NetworkManagerAccessor.java#L8-L12>) 读取channel，要求是仍open/active的EmbeddedChannel；该channel.pipeline().get("packet_handler")与该connection `==`，且pipeline().get(ReplayHandler.PACKET_HANDLER_NAME)与**当前ReplayModReplay.instance.getReplayHandler().getReplaySender()同一个实例**。ReplayModReplay.instance/当前replay为空、accessor缺失、channel缺失/已关、sender/handler/连接不匹配时，一律不做兼容修改，继续原版语义，不catch所有错误。可用instanceof安全拒绝无accessor的外来对象，不另造accessor或反射读取私有ReplayHandler字段。
+4. 上述归属链有本工程源依据：[setup:352–465](<src/main/java/com/replaymod/replay/ReplayHandler.java#L352-L465>)每次创建新ClientConnection和EmbeddedChannel，在公开常量PACKET_HANDLER_NAME安装该ReplayHandler自己的full/quick sender，随后安装packet_handler=该connection；[getReplaySender](<src/main/java/com/replaymod/replay/ReplayHandler.java#L475-L480>)返回当前模式sender，[切模式:540–568](<src/main/java/com/replaymod/replay/ReplayHandler.java#L540-L568>)用同一常量替换pipeline为同一个sender实例。[重启:242–268](<src/main/java/com/replaymod/replay/ReplayHandler.java#L242-L268>)先关旧channel、断开再setup；[结束](<src/main/java/com/replaymod/replay/ReplayHandler.java#L270-L316>)保留新旧会话身份边界。故真实联机即使全局replay指针还活着，也没有该sender实例；不同回放sender不同；同回放回退重建时旧handler不再是mc当前handler且旧channel关闭。**不能仅检查EmbeddedChannel类型、pipeline名字存在、sender类型或CameraEntity**；这些都不能证明当前会话归属。所有身份读取/移除都在主线程同一回调完成，不缓存全局handler/channel供下次使用。
+5. accessor已在 [现有recording清单:14](<src/main/resources/mixins.recording.replaymod.json#L14>)注册，且 [元数据](<src/main/resources/META-INF/neoforge.mods.toml#L50-L60>)已注册两清单，均不需修改。A javap确认named及 [实际运行实例srg基础JAR](<D:/Jerry's/MCJE/.minecraft/libraries/net/minecraft/client/1.21.1-20240808.144430/client-1.21.1-20240808.144430-srg.jar>)均有private Channel channel、handler private final scoreboard及公开getConnection/getPacketListener；运行基础JAR用Mojang名Connection/ClientPacketListener。编译named JAR另有NeoForge channel()，**本方案不用它**，避免把补丁新增方法的版本可用性当成已签字的运行证明；复用既有accessor不增加生产文件。
+6. Netty签名另从 [实际4.1.97.Final缓存JAR](<C:/Users/zhenz/.gradle/caches/modules-2/files-2.1/io.netty/netty-transport/4.1.97.Final/f37380d23c9bb079bc702910833b2fd532c9abd0/netty-transport-4.1.97.Final.jar>) javap确认 `ChannelPipeline.get(String):ChannelHandler`、Channel.isOpen/isActive/pipeline。网页 [Netty官方API](<https://netty.io/4.1/api/io/netty/channel/ChannelPipeline.html>)已搜索并读取，确认get无匹配返回null；网页版本是较新4.1文档，精确可编译性以本地97为准。Mixin的INVOKE/AFTER和require/allow语义由已读取 [At官方源](<https://github.com/SpongePowered/Mixin/blob/master/src/main/java/org/spongepowered/asm/mixin/injection/At.java>)、[Inject官方源](<https://github.com/SpongePowered/Mixin/blob/master/src/main/java/org/spongepowered/asm/mixin/injection/Inject.java>)核对，参数存在性另以 [本地Sponge0.8.7 JAR](<C:/Users/zhenz/.gradle/caches/modules-2/files-2.1/net.fabricmc/sponge-mixin/0.15.2+mixin.0.8.7/2af2f021d8e02a0220dc27a7a72b4666d66d44ca/sponge-mixin-0.15.2+mixin.0.8.7.jar>) javap确认。网页通用语义不冒充已运行Mixin变换。
+
+**C逻辑契约：** 身份门、主线程、packet.getMode()==ADD_MODE、当前同名objective确实存在四者同时成立，才对该旧对象调用一次removeObjective；随后正常返回回调，让原版根据**新包的displayName/renderType/numberFormat**创建新objective。第一次CREATE、不同名字、UPDATE、REMOVE、其他mode、非当前回放连接不得多一次移除/创建；不硬编码commons、不全清board、不取消包、不跳过所有异常、不把重名CREATE改成UPDATE。所有自有helper以@Unique窄命名留在新Mixin内；不放可变静态会话状态、不新建生产类。
+
+#### 19.4.4 分数/显示槽语义、证据缺口和不支持范围
+
+- 已读 [实际264基础Scoreboard字节码:316–381](<C:/Temp/reforgedplay-defaults-playback-20261118-b2741c/diagnosis-agent/Scoreboard.javap.txt#L316-L381>)：removeObjective删除名字索引和criterion索引，遍历所有display slots清空**仅指向旧对象**的槽，遍历玩家scores移除旧objective对应分数，最后通知removed。它不是无损“覆盖标题”；旧分数/槽不会按同名自动挂到新对象上。其他objective/team/其他对象显示槽不得受影响。
+- 新CREATE重建本包属性，后续UPDATE只改属性，**不能恢复旧分数或显示槽**。只有后续相应SET_SCORE和SET_DISPLAY_OBJECTIVE等包才能恢复相应内容。不得为避免空显示盲目复制旧scores/slots到新对象，那可能把被裁剪边界之前的旧世界状态带入新段，且已超出本批准替换策略。
+- 已读 [逐包证据](<C:/Temp/reforgedplay-defaults-playback-20261118-b2741c/diagnosis-agent/verified_packet_sequence.json#L175-L233>)显示两份处理后文件第二CREATE后仍有UPDATE，但该证据主要列SET_OBJECTIVE及状态边界，**没有完整列出score/display后继包**，不足以签“显示完整”。D必须在新证据根另做只读/隔离副本的scoreboard序列审计，分别记录第二CREATE前后的每个显示槽、score holder/value/format以及后续恢复时刻；不是重跑旧诊断脚本，也不能把仅UPDATE当成恢复分数证据。
+- 验收拆分：本次可承诺的目标是**当前回放重名CREATE不再直接抛该异常，且严格局部替换/后续包语义成立**；不保证已丢失包/边界的录像自动还原完整原服务器计分板。若目标样本第二CREATE后缺少恢复包或出现缺行/空sidebar，报告具体缺哪类状态、对应索引/时间，标记“显示保真未成立/不支持自动恢复”，不得以不崩就PASS内容。若用户要求恢复缺失状态或修生成源，需另行授权最小范围。
+- 生成源仍未证实：19.1裁剪/SquashFilter是机制风险，不是本次已定位并修好的生成原因；不改原MCPR、MarkerProcessor、ReplayStudio依赖或Studio实现。EXR既有不兼容、锁文件/认证/DNS/动态光源/java.io.tmpdir ERR等均不顺手修。
+
+#### 19.4.5 B/C/D交接、隔离测试与唯一构建门
+
+**安全取证根与基线：** A未写任何外部证据。首次需要输出时，Lead或后续阶段以create-new语义新建唯一 `C:/Temp/reforgedplay-objective-A-20261118-<随机唯一后缀>`，将实际绝对路径追加本节；本轮探针脚本、stub、classes、合成fixture、变换输出/日志和收据全在该新根，所有非Gradle探针cwd也只能是此根或其子目录。不写项目logs，不触碰旧证据根。执行前记录实际java/java.home/javac/javap21；对src/资源/构建/wrapper/libs及原报告/日志做只读hash保护，对本轮白名单保存前像，收尾用**本轮前后差异**而非对HEAD的累计diff验白名单。UI源必须仍等于19.4.1保护hash。
+
+旧测试只允许复制明确需要的源码文本/stub到新根；复制后先搜出所有硬编码绝对fixture/输出/LOG路径并改成新根，加入resolve/normalize后的startsWith根限制和每次写前断言，确认无旧根/游戏目录/项目logs写路径再运行。不能只换cwd而遗留D5绝对fixture常量；不运行旧脚本、不写原证据、不覆写失败日志。真实MCPR只作标准库ZipFile只读输入或先复制到新根；禁止ReplayFilesService/ZipReplayFile等可能产生sidecar/锁/保存的打开路径，原件和原证据hash应前后不变，不清锁/删恢复材料。
+
+**B交接给C：** 只建本节唯一Mixin骨架＋一次client注册；首选主线程AFTER注入及scoreboard shadow、复用既有channel accessor契约。交出精确descriptor/注册位置、空主体未实现声明和相对本轮基线diff；不改语言、不build、不签功能完成。若框架无法安全绑定连接或必须动其他生产文件，立即停报。C开始前回读本节及B实际文件，不并行抢写。
+
+**C交接给D：** 实现19.4.3身份门及单objective替换，四处计数词变更，追加实现/限制/验证待办。C只写批准文件、不build、不修改测试仓库；D开始前回读C源/语言/实际差异。D允许在同白名单修小编译或映射错误并在收据说明，重大策略变更回报Lead。
+
+**D外部隔离测试矩阵（执行实际生产回调/helper，不抄一份手写算法代测）：**
+
+1. 当前正确FullReplaySender和QuickReplaySender两条pipeline：首次CREATE零额外remove；重名CREATE恰好一次remove、原版恰好一次add，新对象身份与新包displayName/renderType/numberFormat一致；第三次同名CREATE亦可；不同名字及其他objective/team均保持。模式UPDATE/REMOVE/非法mode及无旧objective的行为与未注入原版一致，其他异常继续暴露。
+2. 真实联机对照：global replay指针空/非空都测；socket或伪EmbeddedChannel但无相同sender、只有相同名字/类型的不同sender、packet_handler不是该connection、connection.packetListener不是该handler、mc当前handler不是注入对象、channel空/关闭/inactive，各自必须零兼容移除，重名仍保留原版抛错。不能只测“没开回放”这一条。
+3. 会话与线程：回放A→B，A的迟到包；同回放回退重建后旧连接迟到包；full↔quick；结束后真实联机而全局指针暂存；缺world/未入play。非主线程第一次调用在ensure抛出后尚未移除，只在主线程重入时一次移除一次创建，无双投递；纯直接调用helper的off-thread stub不能代替此调度/注入位置证明。
+4. 状态语义：旧同名objective有多玩家scores、多个display slots，另一个objective有独立分数/槽/team；替换后旧同名状态清空而其他状态不变。发后继UPDATE/SET_SCORE/SET_DISPLAY包恢复新对象并核对具体分数、显示槽和格式；故意不发恢复包时应保持缺失，明确记录此不支持边界。回退重播同序列结果一致。尽可能用真实Scoreboard/packet二进制测试；若只能stub，逐项标注边界，不拿stub的清理规则冒充MC行为证据。
+5. 两份样本依据19.4.4作新的只读score/display后继审计，关联真实重复索引；原逐包证据只读引用，不重跑旧脚本。语言仅四词组差异，原key集合/%s/磁盘未确认段完全不变；设置功能源码不改，旧59＋323通过只作保护基线，不假称本轮重新执行。
+
+**Mixin证据必须分层：** 生产方法/自有helper隔离执行（明确MC/ReplayHandler/线程stub边界）≠ASM数descriptor匹配≠真实Sponge Mixin变换≠NeoForge全模组客户端运行。D应使用现有缓存Sponge0.8.7/ASM/离线映射工具，在新根对实际named目标做真实变换，并对最终remapped non-dev Mixin＋实际264 Mojang/srg目标复核/尽可能真实变换；同时包含既有NetworkManagerAccessor以验证channel身份链。检查require/expect/allow、callback位于ensure成功之后且在add之前、shadow映射、调用原版仍存在；能执行变换后目标则另记动态结果。不得通过手工ASM注入复制回调来伪称Sponge变换命中。standalone host若需屏蔽非本次plugin或stub外部类，必须列明其差异；不能签成NeoForge launch service/全部安装模组验收。若映射/classloader/bootstrap不具备，记录准确BLOCKED/UNVERIFIED，不用编译成功替代此层；新增安装依赖/改生产配置以解锁测试不在范围。
+
+**唯一Gradle调用仅D执行一次：** `mc_gradle(projectDir="C:/Users/zhenz/Desktop/ReForgedPlay-1.21", task="build", args=["-Djava.io.tmpdir=C:\\Temp", "--console=plain"], timeoutMs=1200000)`。20分钟超时留足Loom处理，A/B/C不调用；不clean、不refresh、不-x test、不tasks/help/runClient、不shell wrapper。先用外部静态核查/必要的隔离探针消除小错误，再执行此唯一build；若失败如实记录，不擅自第二次构建。外部javac仅编译新根的隔离探针，不替代项目构建，也不改仓库测试。发现继承Gradle JVM不符合指定Java21则停报，不安装JDK、不改构建/系统环境绕过。
+
+D必须交真实构建工具原文与任务状态（NO-SOURCE不是JUnit通过）、本轮白名单diff和保护hash、最终non-dev JAR大小/SHA256/ZIP完整性、实际JAR内新Mixin与注册一次/两语言词组/映射检查、各层PASS/FAIL/BLOCKED/未测清单。构建会覆盖同名build输出，19.4.1旧JAR收据仅保留为历史，不用当前文件链接冒充旧字节。不能改真实配置、安装包、游戏mod目录或启动用户实例来补验证。真实游戏打开两份失败录像、前后拖动/切模式/重新进入、核对sidebar行/数值/格式，再退出回放连真实服务器，由用户在替换JAR后验收；在此之前明确“真游戏/全模组兼容及显示保真未验收”。
+
+#### 19.4.6 风险及停点
+
+- 首要风险：消除重名异常不等于恢复完整计分板；score/display后继缺失时本策略有明确不可逆清理代价，必须分开报告播放不崩和显示保真。
+- 真实NeoForge21.1.264与编译21.1.82、其他Mixin/Connectivity实际变换链仍有差异；A核对基础字节码与源归属链并非已完成运行时变换。若AFTER hook被改写/匹配数量不一、accessor/shadow不成立，停报，不降require为0。
+- 不能退化为global非空、channel类型或pipeline名字检查；sender对象身份＋注入handler当前性＋连接listener＋活跃channel缺一不兼容，尤其防同sender重启旧channel及指针残留真实联机。
+- JDK路径、外部fixture硬编码/日志cwd及旧证据写入是环境风险；只用指定JDK21及唯一新CTemp根，原证据只读。vendored ReplayStudio库已有，不缺jar也不替换；没有任何安装/迁移理由。
+- A结束时仅本节已追加；生产代码、注册和语言均尚未实施，测试/build/真实Mixin变换均未执行。下一步只能串行交B，不提前交C/D执行。
+
+## 20. 用户新报读取后退出录像列表隐藏：只读诊断及候选释放修复（待批准扩围）
+
+### 20.1 事实与分层证据
+
+- 用户明确：物理.mcpr仍在，退出重进仍不显示，重启电脑（用户称cache/temp等随重启清除）后才恢复。不能由此独断是纯内存锁或纯磁盘缓存，因为重启同时改变进程/句柄/缓存等状态；未要求用户删缓存/删锁/丢恢复材料。
+- 只读独立审计e20b1759-fa23-4fee-82aa-ba86d7ef2070已确认日志两份原件仍在，18_52_30=554397B、18_54_50=523575B，标准库ZipFile中央目录各5项且metaData.json/recording.tmcpr存在，观察期间size/mtime不变。新证据 [physical-files.json](<C:/Temp/reforgedplay-disappear-readonly-20261118-e47b6a91/physical-files.json>)。这不是完整ZIP CRC/回放可播验证，也不把观察到文件存在扩大为所有历史录像都绝无删除风险。
+- 原日志1042–1048/1277–1283及其后列表加载报ReplayFilesService内部lockedPaths的FileLockedException；[列表:377–402](<src/main/java/com/replaymod/replay/gui/screen/GuiReplayViewer.java#L377-L402>)读取失败只日志、不创建条目。因此有明确的“文件还在，但列表因锁跳过”路径，协议objective异常与物理删除不是同一结论。
+- Lead直接读源核对：[FullReplaySender:1080、1369](<src/main/java/com/replaymod/replay/FullReplaySender.java#L1072-L1081>)取得ReplayInputStream；[terminateReplay:382–421](<src/main/java/com/replaymod/replay/FullReplaySender.java#L382-L421>)只停生产/shutdown/中断/关channel/释放资源包，无packet stream close；[async退出:1207–1210](<src/main/java/com/replaymod/replay/FullReplaySender.java#L1207-L1210>)无finally；[同步EOF:1407–1411](<src/main/java/com/replaymod/replay/FullReplaySender.java#L1407-L1411>)直接将replayIn=null未close。仅在某些restart分支close并不覆盖结束/EOF。
+- 精确vendored ReplayStudio javap经只读审计确认AbstractReplayFile.getPacketData走虚拟get(recording.tmcpr)，ReplayInputStream.close才实际关底层。当前adapter [read:80–95](<src/main/java/com/replaymod/core/files/TransactionalReplayFile.java#L80-L95>)跟踪真实stream使用数，[finishClose:298–313](<src/main/java/com/replaymod/core/files/TransactionalReplayFile.java#L298-L313>)活stream存在时不释放；Managed只在真实release时解[服务锁:70–73](<src/main/java/com/replaymod/core/files/ReplayFilesService.java#L70-L73>)。此安全门不应删掉；应修播放器自己漏关的读者。
+- Lead新根 [实际流锁探针](<C:/Temp/reforgedplay-leak-proof-20261118-c1e932/LeakProof.java>) 只用合成MCPR，重新编译当前生产核心/实际ReplayStudio（MC/GUI边界stub）：真实ReplayInputStream存活→Managed.close延迟→列表openReadOnly实际FileLocked→原字节不变；实际stream.close→真实release→同文件无需删cache或重启即可metadata预览、原字节仍不变。编译/运行均exit0，7项计数含1项fixture初始检查，[原日志](<C:/Temp/reforgedplay-leak-proof-20261118-c1e932/proof.log>)。这是实际适配器/Service所有权链验证，不冒称已动态跑过FullReplaySender或复现重启磁盘缓存的全部因素。
+- 另有[ReplayHandler:289–290](<src/main/java/com/replaymod/replay/ReplayHandler.java#L289-L290>)save抛异常就跳过close，finally仅终止sender；[GuiHandler:229–238](<src/main/java/com/replaymod/replay/handler/GuiHandler.java#L229-L238>)可能随后清全局handler指针，让泄漏不再可达。startReplay初始化/兼容警告另有所有权疑点，未认定为本次必需修改；不得全面重构或以可写播放全部改只读来破坏标记/时间线编辑。
+
+### 20.2 候选新增白名单及硬约束（当前未实施）
+
+- 申请在19节已批四生产/资源文件之外，仅再增加现有 [FullReplaySender.java](<src/main/java/com/replaymod/replay/FullReplaySender.java>) 与 [ReplayHandler.java](<src/main/java/com/replaymod/replay/ReplayHandler.java>) 的退出/EOF读流所有权及save失败close局部修复。本计划记录许可；不改Service/adapter/cache真实释放门、不强移除lockedPaths、不改Viewer去忽略错误、不删原文件/sidecar/恢复记录/缓存、不改真实设置或依赖。
+- FullSender在终止和同步EOF确保它持有的packet stream由实际读者停止后恰好一次真实close，再清引用；异步终止/模式切换/同步任务/预读需明确区分，不能在仍读取时由主线程强关。主线程不join/await worker、不等sender长monitor，保留既有session/generation与资源包lease协议；必要后台收尾只在本类内，不另造生产框架。真实close失败不伪造release，保留诊断及重试机会。
+- Handler保存失败也应请求保源的真正close，并保留主异常/附加close异常，而非异常路径跳过文件收尾；依旧只在所有真实读者释放后由现有adapter交回服务锁，不能用逻辑close冒充收据。新回放/新联机的重入身份隔离保持，不把普通播放改只读而破坏回放内编辑。
+- 批准后由A补精确竞态/关闭算法及测试门，合并到同一A→B→C→D链、同一最终构建；目前B尚未开始，无两个生产writer并行。验证实际FullSender终止/同步EOF/重复terminate/模式切换/有阻塞读者/close失败保留、Handler保存失败仍close及原件hash、退出后重开/列表读取，必须区分隔离生产执行与真实游戏。若需要更多源码（如启动兼容警告所有权）先报告，不静默扩围。
+- Lead已读 [只读审计完整报告](<C:/Temp/reforgedplay-disappear-readonly-20261118-e47b6a91/AUDIT.md>)。报告把“默认观看不得篡改原件”写为产品边界，是代理在只读取证约束之外的推断，不是用户已确认的新交互要求；本轮不能据此废除原有标记/时间线等编辑保存。私有副本/另存为观看模式是更大设计，不纳入这次释放修复。报告列出的启动/兼容取消额外所有权缺口保留为已发现但未授权范围，不谎称仅修两个退出文件就覆盖全部启动失败路径。
+
+### 20.3 用户已批准“一并修复并验证”：退出读者精确算法及合并交接（A续，2026-11-18）
+
+#### 20.3.1 授权覆盖、成功标准和本轮观察边界
+
+- 用户已通过ask_user_question选择“一并修复并验证”，新增授权**仅两个已有Java文件的退出/EOF及异常收尾局部**；20节标题及20.2“待批准/申请”保留为历史，现由本节覆盖。B尚未开始；仍是**一次A→B→C→D，严格串行，一个最终build**，不是追加并行修复链，不再每小步确认。
+- **19.4全部objective身份门、注入位置、语言四词组、取证/文件保护和显示保真限制原样有效。** 只把19.4.2的禁止改两sender/handler条款中的FullReplaySender、ReplayHandler，为本节指定的局部收尾开白名单；其他禁止不变。本轮不把“默认播放必须只读”当用户要求，不改变marker/timeline等原有编辑及正常退出save权限。
+- 成功标准分开：①原objective兼容门全部保留；②terminal请求不在MC线程取得长期sender monitor，不join/await实际读者，packet stream在实际读取停止后真实关闭；③EOF不遗失关闭入口，正常模式切换/合法预读不被terminal化；④Handler的closing callback/terminate/save失败仍请求保源close，primary/suppressed可追溯；⑤真实adapter不提前release，最终实际close成功后同路径可重开。某读者永久不退出或底层close永久失败时只能保持安全锁/诊断/重试，不承诺强制释放成功。
+- A本次先重读 [构建](<build.gradle>)、[属性](<gradle.properties>)、[wrapper](<gradle/wrapper/gradle-wrapper.properties>)、[NeoForge元数据](<src/main/resources/META-INF/neoforge.mods.toml>)及libs/src，确认仍为**MC1.21.1 / NeoForge21.1.82 / Java21 / Gradle8.8 / Architectury Loom1.7-SNAPSHOT / Yarn1.21+build.1＋NeoForge patch1.21+build.4**。多个旧metadata并存不能误判时代；不升级/改映射/改构建。A只追加本节，没有改生产/资源，没有运行javap、测试、构建、旧脚本，没有安装包、Git写或读取.whale内容。
+
+#### 20.3.2 核实依据及最小性结论（不是已实现/已动态通过）
+
+| 核实点 | 精确证据/本次读取 | 对算法的约束 |
+|---|---|---|
+| packet stream的真实所有权 | 本次读取既有精确vendored Studio [getPacketData字节码:206–231](<C:/Temp/reforgedplay-disappear-readonly-20261118-e47b6a91/replaystudio-javap.txt#L206-L231>)、[ReplayInputStream.close/readPacket:3180–3208](<C:/Temp/reforgedplay-disappear-readonly-20261118-e47b6a91/replaystudio-javap.txt#L3180-L3208>) | getPacketData虚拟调用get(recording.tmcpr)；EOF不等于close；close直接调用底层in.close，无本层成功标志可代替真实调用。无需新Studio API/依赖。 |
+| 所有packet读取/重开/预读目前受同一monitor串行 | [FullReplaySender异步:1072–1210](<src/main/java/com/replaymod/replay/FullReplaySender.java#L1072-L1210>)、[同步:1333–1424](<src/main/java/com/replaymod/replay/FullReplaySender.java#L1333-L1424>)、[PacketData:1755–1799](<src/main/java/com/replaymod/replay/FullReplaySender.java#L1755-L1799>) | 可复用已有this monitor作**后台排空屏障**，不必全文件换锁/引入per-read引用计数/新增reader框架。禁止把这把锁搬到主线程终止路径。 |
+| 活stream及close失败的真实门 | [adapter:80–95、292–315](<src/main/java/com/replaymod/core/files/TransactionalReplayFile.java#L80-L95>)、[Managed:27–49](<src/main/java/com/replaymod/core/files/ManagedReplayFile.java#L27-L49>) | 底层流close失败不减计数；末流close也可能在finishClose阶段抛错。即便末流已减计数，也可能仍需再次ReplayFile.close完成后半阶段。可复用现有ManagedReplayFile.isReleased/preserveRecovery，不修改这些类。 |
+| shutdown不是读者已退出凭证 | 2026-11-18搜索后读取 [JDK21 ExecutorService官方API](<https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/ExecutorService.html>) | shutdown允许已排队任务继续，且立即返回；不能以isShutdown/取消Future当零活读者。保留shutdown，不用shutdownNow造成未运行任务的doneSending永不置位；绝不用JDK21 ExecutorService.close（它会等待）。submit可抛RejectedExecutionException。 |
+| interrupt不是任意I/O已退出凭证 | 2026-11-18读取 [JDK21 Thread官方API](<https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Thread.html>)；本地 [SchedulerImpl:20–28](<src/main/java/com/replaymod/core/versions/scheduler/SchedulerImpl.java#L20-L28>) | sleep/runSync的Future.get可被中断；阻塞reader/monitor未必可中断。只能用terminal admission＋实际monitor排空证明不再读，不能interrupt后立即清ref/close。 |
+| 失败链 | 2026-11-18读取 [JDK21 Throwable.addSuppressed官方API](<https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Throwable.html#addSuppressed(java.lang.Throwable)>) | addSuppressed线程安全，但禁止self/null；先发生的业务失败保持primary，独立cleanup失败附加，后台失败必须另有实际日志和保留状态，不能只塞进已返回的Future。 |
+
+**最小性选择：** 复用this作读者屏障，新增一个仅FullSender内部、至多一个同时存活的packet/file收尾线程；不新增executor/生产类/公共生命周期框架，不重写读取调度。该线程也承接Handler的**最终ReplayFile.close请求**，因为主线程直接close可能在adapter的真实read monitor上等待，或触发耗时protect/finish。正常save仍由Handler主线程按现有时序执行（关闭回调之后、close请求之前），不擅自把save异步化：只读检查已确认 [startReplay:166–185](<src/main/java/com/replaymod/replay/ReplayModReplay.java#L166-L185>)、[render queue:249–258](<src/main/java/com/replaymod/render/gui/GuiRenderQueue.java#L249-L258>)依赖其同步退出/IOException边界，异步保存会扩大调用契约。
+
+**不得过度承诺“整个endReplay无阻塞”：** 本方案保证终止控制/关闭请求本身不等待sender读者；既有save本来就是同步I/O，可能等待adapter内部read；任意用户回调也可能阻塞。只读还确认 [现有SimplePathing closing回调:176–185](<src/main/java/com/replaymod/simplepathing/ReplayModSimplePathing.java#L176-L185>)自身await最多一分钟，表外不能改。本节不再新增主线程join/await/读者等待，并移除Handler自己已有的channel.close().awaitUninterruptibly；不声称顺带消除外部回调/保存I/O的所有卡顿。若D发现必须改这些表外调用才能解决确定死锁，报告BLOCKED，不把异步save或任务泵等待偷塞进本补丁。
+
+#### 20.3.3 FullSender新增窄状态/helper与锁序
+
+以下是C需实现的局部职责，helper名字可沿项目习惯小调但不得多造框架；B只能建惰性声明/stub，不能先执行这些新语义。
+
+- sender monitor保护一个新 `replayInputClosePending`（当前stream已退休、不得再读/覆盖）；继续只持有既有 `replayIn`，**不另建丢失流的列表**。退休失败就留下原对象及pending，未成功关旧流禁止再赋新流。`nextPacket/replayInGeneration`仍受原锁保护，不重标旧包generation。
+- 新短 `packetCloseStateLock` 只保护请求/线程启动与诊断元数据：`packetCloser`、单调请求序号、`replayFileCloseRequested`、已确认完成状态及最少故障引用（业务primary、第一次packet-close失败、第一次file-close失败/最新诊断）。这些是**实例字段**；不加静态会话集合。请求计数和运行线程标记避免“worker刚退出，Handler才追加file-close”丢通知。不得在此锁内取sender monitor、做I/O、启动主线程回调或等待主线程；worker在等待重试时用wait释放此短锁。
+- `closeReplayInputLocked()`：调用方已持有this，设置pending，尝试**当前对象**真实close；成功才清 `replayIn`，清pending。异常则保留原对象/pending，向调用方传播IOException/RuntimeException/Error；不得finally置null、先detach再遗忘或提前宣称closed。重复成功关闭为no-op；失败后的再次真实尝试不违反“恰好一次成功关闭”。若底层流已关但adapter.finishClose抛错，保留入口并在terminal file阶段再次ReplayFile.close，不能误认为再次stream.close足够。
+- `requestPacketInputClose()`：仅登记terminal清流请求并确保后台线程已启动/被唤醒；不取this，不直接close。`requestReplayFileClose(Throwable primary)`为**包内、只供Handler退出使用**的窄入口：合并primary，登记最终文件close及保源意图，唤醒同一线程；不是可任意提交Runnable的通用任务队列。这些入口可被重复调用；Handler传来业务primary时应将此前独立保存的cleanup故障附加到该业务primary，而不是反过来让早到的后台cleanup盖掉业务主错；同对象不重复suppressed。Thread创建/start失败必须保留请求和引用、同步抛出/记录，不能置假完成。
+- `runPacketCloseWorker()`：只处理本sender、本ReplayFile及诊断；名字如replaymod-packet-input-close，daemon，在失败/尚未真实release时维持可达的重试责任，**不因handler全局指针被清掉就遗失失败流**。至多一个同时存活；正常成功且无待办时退出，晚到请求可串行重新启动一个，不积累空闲线程。
+- worker先在**不持短状态锁/不持modeLock**时取得this，等实际当前reader退出；terminal gate已关闭，排队reader随后只能no-op。worker可在该锁内关闭当前packet流，清terminal的nextPacket；不得在锁内runSync/executeTaskQueue/join任何线程或触碰handler/world/global指针。离开this之后才执行ReplayFile保源/close/receipt检查及日志，不能拿sender锁包住全部文件收尾。
+- 最终file close先处理已登记业务primary：若为现有ManagedReplayFile，用其已核验的preserveRecovery(primary)保留恢复意图，再请求close，不自动save/saveTo/删恢复材料。每次即使packet-close失败也应尝试一次文件close请求，让adapter保持closing门；活流仍在时它只能延期，不允许伪造release。Managed只有isReleased()==true才登记“实际释放确认”；返回close但isReleased=false是PENDING而非PASS；非Managed只记“close调用返回”，不得称服务锁已交回。
+- packet/file close失败：保留对象/原primary与第一次对应cleanup异常，真实记录LOGGER.error或等效既有日志（含阶段、retrying及可得恢复信息）；失败后以1秒起、上限30秒的有界退避重试，等待时不持this/modeLock，新的terminate/file-close请求唤醒重试。不busy-spin、不每次向primary无限追加新同类异常（保留首个每阶段suppressed及最新日志即可）、不调用System.gc、不通过删锁“修好”。永久失败可使该daemon持续保留安全锁，这是未释放状态，不是成功。无已知失败但Managed尚有其他活stream时同样低频核对/重试文件close，由真实adapter决定何时release。
+- 请求发布/worker退出必须同一短锁线性化：处理完一次快照后再看请求序号/待办，只有确认无新增请求且本次所需close已确认才清线程标记退出；失败/PENDING不能清掉最后的可达重试责任。后台不需要任何MC回调，故不依赖主线程泵队列完成关闭。
+
+#### 20.3.4 FullSender各生产入口的精确改动点
+
+1. **terminal与once-only分开。** 保持既有stopResourceProduction的lease.stop→terminal→terminate/asyncEpoch→interrupt顺序，resource-pack生产gate不改。terminateReplay保留terminationCleaned只管shutdown/events/channel的一次清理、resource-pack requestRelease原协议；在覆盖所有失败的finally中另行requestPacketInputClose，**不能把它放进terminationCleaned CAS内部**，否则失败不可重试。重复terminate不重复事件/channel，不抑制真实close失败诊断，已有collectFailure继续保留原primary。
+2. **排队sync任务≠活reader。** syncSender.shutdown后已排队任务仍会运行原finally置doneSending，但terminal admission必须在doSendPacketsTill的sender monitor内再次检查，不能重开流。终止清流不以executor终止或asyncWorker字段证明排空；以this实际取得证明。sendPacketsTill的submit竞争只在terminal确已成立时把RejectedExecutionException当取消返回，否则照常传播；doneSending等待循环遇terminal可直接返回，不能留下MC线程为已停止任务无限自旋。setSyncModeAndWait显式模式切换仍可泵任务队列，终止重入后立刻退出等待；terminate本身绝不调用它/awaitTermination/Future.get。
+3. **异步真正退出。** runAsyncSender增加覆盖return/break/InterruptedException/异常退出的finally；terminal时它只请求同一closer，不在非terminal普通mode切换时关闭共享stream/清合法nextPacket。terminal会中断长sleep/paused/runSync等待；autoRead循环继续检查terminal，迟到runSync/MC callbacks继续由原session/generation门拒绝。不得为等closer而阻塞MC，也不得要求MC替closer完成文件I/O。
+4. **EOF保留关闭入口。** sync EOF不再直接replayIn=null；在当前读者持有this且本次read已结束的位置调用closeReplayInputLocked，成功后才清；异常不落回“继续read”的IOException循环，报告并结束此次发送，保留pending供下次调用或terminal后台重试。async EOF亦在pauseAsync/EOF等待前退休真实stream，不让暂停后的EOF读者继续占锁；若close失败则退出本次worker并保留失败，不能无限读已退休stream。**EOF不是terminal，不stop lease，不advanceGeneration，不误清其他合法预读**；保留原暂停/后续重播意图及原EOF之后的控制时序，本补丁不另设计自动循环/EOF产品行为。
+5. **restart及异常路径统一。** 两个已有restart close分支改调用同一close helper，成功才允许打开新流，失败不可覆盖旧流；restart自己原有nextPacket丢弃和generation边界不改。getPacketData前/任何PacketData读取前发现pending，先在this内重试旧流close；仍失败则退出，不在已退休对象上read。非terminal意外worker异常如需退休流，必须在**该次持有this的try/catch/finally内部**完成，不能先解锁再由旧worker外层finally去关可能已属于新worker的流；记录原异常并suppressed关闭失败，保留restartPending。不要把普通epoch失效/Full↔Quick/false→true mode切换当异常退休，更不能仅因worker线程退出就清nextPacket。
+6. **保留prefetch/session。** 仅terminal、实际EOF、原有后退/连接代际退休及真正不可继续的异常允许清对应nextPacket；正常sync↔async模式交接保留同stream同generation预读。forward rush只更新control意图，不能为清流advanceGeneration。既有dispatchGeneration ThreadLocal、controlEpoch、resourcePackLease、loader/connectionEpoch/ownsFullReplaySender判定及ready/queued admission原封不动。
+
+#### 20.3.5 Handler局部收尾算法、失败链与重入
+
+- 仅修改endReplay及其同类窄helper/字段，不改构造try边界、setup/startReplay/兼容取消。保留MC线程前置校验、constructionFailed门、ending gate和新旧会话身份保护；不会让closer执行handler/world/UI回调。
+- 新增最少退出进度标志：closing callback已尝试、closed callback已尝试、save已尝试、最终file-close已请求（及必要的Quick unregister成功标志）。事件标志**调用前**置位，递归endReplay由endInProgress拒绝；回调抛错也不再次重播整组事件。不能声称失败事件中尚未运行的listener都已运行。原endCompleted只标记逻辑退出已完成，**不是实际文件release凭证**；重复调用即便逻辑completed也可唤醒已有file-close重试，但不能重新save/重发事件/碰新会话。
+- 正常路径仍是：stopResourceProduction→closing callback一次→terminateReplay（一次性channel/events清理）→原有Quick unregister→save一次→登记requestReplayFileClose(null)→本handler原有channel/UI/world/closed callback逻辑。**save保持同步**、保持编辑保存能力；移除Handler自己的awaitUninterruptibly，只请求关闭其本地EmbeddedChannel，不等读者。file-close登记是异步资源请求，不叫真实释放收据；后台失败通过真实日志+保留状态/重试报告，不假称会同步从endReplay抛回晚到的IOException。
+- 任一stop/closing callback/terminate/Quick unregister/save异常：保留最先的IOException/RuntimeException/Error为primary；finally中分别尝试terminateReplay和requestReplayFileClose(primary)，前一步异常不能跳过后一步。close请求不调用save，不把未成功save改成已提交；Managed.preserveRecovery在真正close之前保留未提交编辑/失败材料。业务失败仍按原类型抛出，cleanup独立失败附加suppressed，不用finally异常替换业务主错；后台后来才发生的失败还必须输出含primary关联的日志。
+- 一旦file-close开始/请求，**重试只做收尾，不再save**，因为adapter.closing会拒绝新修改；不能重复调用save制造二次“closing”异常，也不能为重试取消真实close gate。首次失败时尚未执行的UI清理可按原身份门再试，closing/closed事件不得重复。Quick unregister若失败可重试其收尾，不把“已开始”冒充“已成功”。
+- 回调可同步打开新replay：channel/overlay局部清理仅本handler持有对象；disconnect/timer/forcefullyStopReplay/setScreen仍每次检查当前全局handler==this，回调返回后重新检查。closer仅捕获旧sender与旧ReplayFile，不读取或清理当前新handler/新loader/新channel。保持19.4连接身份门不受逻辑结束、指针残留或迟到close影响。
+- **未覆盖明确列出：** 初始metadata/getMarkers/FullSender构造失败、startReplay先开新file再结束旧handler的所有权、GuiModCompatWarning取消/Esc/屏幕替换、GuiHandler菜单兜底等更大所有权缺口仍未修；此处只修已建handler退出及FullSender自身读取收尾。不能因为构造catch会间接调用更完整的terminate就签字“全部启动失败已回收”。
+
+#### 20.3.6 合并文件所有权与严格串行B/C/D
+
+| 合并白名单（仅此表） | B：框架，不改变可执行语义 | C：串行内容 | D：审查/验证 |
+|---|---|---|---|
+| 新增 `src/main/java/com/replaymod/replay/mixin/Mixin_ReplaceDuplicateReplayObjective.java` | 19.4一个Mixin空回调/shadow/精确hook | 身份门＋CREATE同名局部替换 | 19.4实际变换/动态矩阵；窄编译/映射修正 |
+| [mixins.replay.replaymod.json](<src/main/resources/mixins.replay.replaymod.json>) | client注册一次 | 不额外扩展 | 打包/映射及一次注册 |
+| [en_US.lang](<src/main/resources/assets/replaymod/lang/en_US.lang>)、[zh_CN.lang](<src/main/resources/assets/replaymod/lang/zh_CN.lang>) | 不动 | 19.4指定四词组，不改hint.tasks | key/%s/保存未确认语义保护 |
+| [FullReplaySender.java](<src/main/java/com/replaymod/replay/FullReplaySender.java>) | 仅必要惰性字段声明/未接线窄stub；不得启动线程/实际close/改循环或异常语义；无必要则完全不改 | 本节输入流退休、terminal后台收尾、submit竞争/等待退出最小接线 | 实际生产方法/线程/流锁矩阵；仅同范围小修 |
+| [ReplayHandler.java](<src/main/java/com/replaymod/replay/ReplayHandler.java>) | 仅必要惰性标志/未调用stub；不得提前改endReplay语义 | 本节失败仍请求保源close、once-only/retry/身份门，去本地await | save/callback/terminate失败动态测试；不扩大入口/构造范围 |
+| [plan.md](<plan.md>) | 追加B框架前像/交接 | 追加C实现/限制 | 真实收据/失败及未测项 |
+
+合并总数：**一个新Java＋两个已有Java＋一个Mixin清单＋两语言＋本plan（七个文件）**。B不能为“框架”添加通用任务接口、新生产类或临时仓库测试；C/D完成不得残留TODO空stub/重复框架。19.4其余全部只读限制继续，特别是Service/Managed/Transactional adapter/ReplayWorkspace/cache/ReplayModReplay/GuiModCompatWarning/GuiHandler/Viewer/QuickSender/lease bridge/设置UI/构建/依赖/metadata/libs；不改lockedPaths、不删除恢复/缓存/原文件、不全播放readonly，不动.whale，不装包，不Git写。
+
+**交接次序：** A本节完成→B一次合并骨架及Mixin注册→C先objective＋语言片，交接并回读后**同一C顺序**完成释放片→D。若Lead出于上下文将C分两个子回合，也必须前一个完整结束后再启动后一个，不存在两个生产writer。B/C均不build；D开工前读取两片实际源码和相对本轮前像diff。D可在表内修小错误，策略/文件扩大即停报，但不再为表内每个小步骤申请批准。
+
+#### 20.3.7 D新增最小真实生产方法动态矩阵（与19.4合并，不以旧adapter演示代测）
+
+沿用19.4唯一新CTemp证据根规则，**本轮只创建一个新的、create-new随机唯一根**容纳objective和释放两片所有脚本/夹具/classes/日志/收据；若尚未创建可采用 `C:/Temp/reforgedplay-objective-release-20261118-<随机唯一后缀>` 并记录实际路径，不再开第二个根。所有非Gradle命令cwd为该根/子目录；绝不运行旧探针或写旧证据。旧LeakProof/AUDIT/javap只作只读因果依据；需要的旧stub文本复制后审计所有路径常量及写前root断言。真实用户MCPR仅标准库只读或隔离副本，不对原件走Service/ZipReplayFile。
+
+**真实性门：** 必须执行修改后的实际FullReplaySender.terminateReplay/runAsyncSender/doSendPacketsTill/sendPacketsTill及ReplayHandler.endReplay（必要用反射驱动private生产方法），不复制一份手写关闭算法代测。MC/GUI/事件边界可stub，但当前ReplayStudio、生产Service/Managed/adapter尽可能真实参与合成MCPR链；明确每项是“生产sender真实方法＋哪些stub”还是“仅adapter因果验证”。原7项LeakProof收据不是本次sender PASS。外部javac只编新根夹具和所需生产源/类，不改仓库测试；若整类依赖无法隔离，列准确BLOCKED，不能裁掉关键finally/锁/循环后冒称整类已测。
+
+| 必测slice | 调度与观测（有界latch/barrier，不靠随缘sleep） | 验收 |
+|---|---|---|
+| idle terminal、重复terminal | 未开流/已开但空闲分别实际terminate两次以上；收尾完成后再调用 | 无MC join/await/sender monitor等待；零流不造流；已开流真实成功close一次；events/channel/lease一次语义不变，无多closer |
+| active terminal、不可中断blocked reader | reader持this进入真实/包装read，用latch阻塞且忽略interrupt；另一“MC线程”调用terminate；随后才放行reader | terminal调用先返回、close计数仍0/锁仍在；放行后read退出，再真实close一次/最终release。不得通过强关reader解除latch；永久不放行标PENDING/安全持锁，不签已释放 |
+| 异步实际退场 | 真runAsyncSender线程分别paused、长timestamp sleep、autoRead=false、runSync pending；terminal后排队旧主线程callback迟到 | 测实际worker退场/finally和closer；无monitor↔MC等待环；迟到回调无新会话动作；仅interrupt调用次数不足以PASS |
+| sync EOF、async EOF | 合成短/空packet流；实际生产读取到EOF，包含minimal framing与Studio readPacket路径可达性说明 | EOF真实close且ref仅成功后清；async EOF暂停前不再占stream；close失败保留pending、未再read/覆盖，随后terminal可补关；EOF不terminal/不stop lease |
+| shutdown队列与submit race | 一个正在读任务＋至少一个排队任务；shutdown前后barrier制造submit竞争；terminal时主调用仍在doneSending循环 | 活读者未结束不提前关；排队任务finally完成/no-op不重开；terminal submit拒绝正常取消，非terminal拒绝仍暴露；主等待可退出，无shutdownNow丢done |
+| 模式、预读、回退 | sync预读一个未来包→async→sync；旧worker迟到；Full↔Quick；forward rush与后退/连接重建 | 正常mode切换不关合法stream、不清合法nextPacket、不advanceGeneration；包恰好一次且旧generation不被重标；后退原关闭/重开正确 |
+| close失败及重试可达 | 首次底层packet close抛，再成功；另测底层已关而adapter.finishClose失败；file.close本身失败；连续terminate/Handler清全局指针 | 原ref/primary/suppressed/真实日志可见；失败时无fake release；只有一个在途closer；即使全局handler被清仍有重试责任；成功后同一真实底层close不重做，file后半段可再次close完成 |
+| Handler异常收尾 | 实际endReplay注入closing callback、terminate、save各自失败；组合save主错＋close次错；Quick注销失败；closed callback失败 | 每条仍登记file close；primary身份/类型不变、cleanup suppressed无self/覆盖；未提交fixture恢复材料仍在、无额外save；重入及重试不重复closing/closed、终止事件，不因endCompleted跳过已有重试 |
+| 旧handler→新会话 | closing回调同步安装B；A迟到closer/事件/重复endReplay；另测回真实联机但旧指针残留 | 只关A持有文件/流/channel/overlay；不disconnect/清B、不改B timer/screen/loader；结合19.4旧handler objective拒绝门 |
+| 真实adapter端到端 | 合成MCPR经实际Service打开，由实际FullSender读取路径调用ReplayFile.getPacketData持流，Handler失败/正常退出请求close；列表等价openReadOnly重开同路径 | 持流期间真实FileLocked、没有删锁；实际stream关闭＋adapter真实release后metadata可重新读取；失败保源case原输入hash不变/恢复可读。正常可写save允许现有语义，不能把fixture合法save当用户原件被禁改的新需求 |
+
+**回归/证据要求：** 19.4所有objective/score/display/真实Sponge变换门不减少；重新在新根执行所需资源包lease/session边界回归：暂停/autoRead/runSync终止、旧producer/queued admission、forward rush合法包、后退generation、Full↔Quick、结束→新replay/真实联机、重复release、ready路径延迟加载及close失败不误删。旧测试只可复制审计后的文本，不运行旧脚本。UI源仍需19.4保护hash，表外生产/资源及原证据前后不变；旧59＋323/旧build只历史，不谎称本轮重跑。
+
+#### 20.3.8 唯一build、产物与未测风险
+
+- D仍且仅一次调用：`mc_gradle(projectDir="C:/Users/zhenz/Desktop/ReForgedPlay-1.21", task="build", args=["-Djava.io.tmpdir=C:\\Temp", "--console=plain"], timeoutMs=1200000)`。A/B/C不build，不tasks/help/clean/refresh/runClient，不shell wrapper，不追加第二build；失败原样报告。构建前完成可做的静态及新根生产方法探针，Java21继承环境不符停报，不装JDK/改环境/依赖绕过。
+- D交工具原文/任务状态、相对本轮前像七文件diff、表外保护hash、最终non-dev JAR大小/SHA256/ZIP完整性/新Mixin一次注册及映射和语言词组、生产sender/handler动态matrix逐项结果、真实adapter重开收据、真实变换层级和全部FAIL/BLOCKED/PENDING；后台关闭只“已请求”的项不能算release PASS，NO-SOURCE不能算测试通过。
+- **风险/停点：** uninterruptible reader不退出、末流close或protect/cache.finish永久失败会故意留锁，不能强清；后台收尾为eventual而非方法返回即release。Handler原save及表外回调仍可同步阻塞，本补丁不承诺全退出零卡顿；不通过全面异步save/改SimplePathing等表外文件偷解。真实NeoForge运行264与编译82、实际Mixin链及全模组GUI/资源包行为仍需游戏验收。构造/启动/兼容取消额外所有权缺口明确未修。
+- **真游戏未测**：D隔离生产执行/adapter链/构建成功也不等于用户实例可播及列表体验已验收；最终仍需用户替换包后打开两份录像、重复进退/切模式/拖动、核对score/sidebar及列表恢复、退出回放连服务器。不得安装到用户游戏/改配置/删cache来替代验证。A本节结束时仅计划已追加，新增两个生产文件也均未改；下一阶段只能串行B。
+
+### 20.4 Lead复核、唯一证据根及用户重启边界补充
+
+- Lead已读A首轮19.4及续规划20.3，批准既有精确范围内依次交B→C1(objective/语言)→C2(退出释放)→D。当前生产文件仍与设置交付基线一致。B无需为了框架而给FullSender/Handler制造无用字段或stub，可只建唯一Mixin空hook与client注册，退出片的真实状态/helper由C2一次接入；不得将任一空hook签为功能修好。
+- **本轮唯一取证根已由Lead create-new建立：** `C:/Temp/reforgedplay-objective-A-20261118-6d9a3c`。baseline-hashes.json记录567项source/build/wrapper/libs/用户日志和报告；allowed-sources.json列六实现/资源文件（另plan）；五份既有文件前像用于真实本轮diff，新Mixin在B前不存在。check_scope.py before-B实际输出changed=[]/added=[]/protected_unchanged=567；UI原hash及当前JAR仍匹配19.4.1。B/C/D所有新输出均只在此根下自己新子目录，别另开总根或复用旧D路径。
+- Lead在该根 [验收输入定位](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/LEAD-VERIFICATION-INPUTS.md>)列出可只读复制重编译的旧Sponge host源码/CP及旧Full/Handler回归输入定位，不运行旧脚本/旧classes、不写旧根。现有archive_packet_observations对18_52_30第二CREATE后的index372显示、414–422分数及另一份对应包已有raw观察，但仍不是完整score/reset审计；D按19.4执行完整新审计，不能以几个后继包冒称完整保真。
+- Lead额外尝试只作MC API语义取证（非生产Mixin验证）的ScoreboardFacts：javac成功，首次runtime被旧宽泛compile CP内DFU6抢先导致Codec.stringResolver NoSuchMethodError；按本机MC metadata明确的DFU8.0.16调整**仅外部probe CP**后，第二runtime到MC注册表Not bootstrapped失败。两轮原日志保留，未再盲目重跑或改项目依赖；**没有实际MC Scoreboard动态PASS**。D若继续这层需用准确声明依赖及合法bootstrap/清楚的隔离边界，不拿此处编译成功当动态通过；原Sponge变换门仍保持。
+- **用户最新明确补充**：是完整关闭Minecraft后重新启动仍不显示；可将重启电脑理解为清cache/temp，不排除缓存原因。此事实高于早期“同进程退出重进”的可能解释。lockedPaths是每个Service实例的内存集合，不可能跨已结束JVM直接延续；既有日志/流锁探针只证实一条真实缺陷，不能唯一解释该跨进程观察，不能宣称关闭reader就已证明解决全部列表隐藏。
+- D新增同一合成MCPR/相同cache与tmp根的冷新JVM对照：先退出/异常收尾，**不清cache/temp**，在新进程由实际Service/list-equivalent openReadOnly读取metadata；再区分此前仍活进程持锁/已结束owner、有效缓存/失败恢复材料。所有样本为新根合成小文件，不操作用户原cache/temp或真实配置。若现有白名单之外的持久缓存/临时恢复问题被实际复现，记录准确FAIL及需要的新最小文件，不擅自改cache/Workspace保护；此新诊断不成为再删cache或绕锁的理由。最终报告保留用户实际跨进程重现尚未由真游戏验证的边界。
+- 旧D-final“save失败后二次end重试save成功”的历史F1与本轮“失败也请求保源close”契约冲突已在20.3.5明确改为：close请求后仅重试收尾、不重做save；失败编辑依靠既有恢复材料保留。D必须在新结果中说明这一语义变化，不能套旧F1标签或把假保存成功算通过。
+
+### 20.5 B框架交接（2026-11-18；仅空hook，功能未实现）
+
+- B已完整回读19.4、20.3、20.4及构建/属性/wrapper/NeoForge metadata，确认仍为MC1.21.1、Neo21.1.82、Java21、Gradle8.8、既有Architectury Loom1.7-SNAPSHOT及原映射；不scaffold、不改版本。受本B角色明确禁止查skills的约束，本B未加载技能；19.4.1中A的加载记录仍只是A的动作，没有冒充B已加载。本轮API依据为精确本地JAR的实际只读javap。
+- **唯一B输出子目录：** [B-skeleton-20261118-7f2c91](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/B-skeleton-20261118-7f2c91>)，在20.4已定唯一根下create-new建立。所有命令cwd及新增脚本/日志/收据均为该子目录；未运行旧脚本或改旧证据/项目logs。执行前[保护检查](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/B-skeleton-20261118-7f2c91/scope-before-B.json>)为changed=[]、added=[]、567项原hash全部一致。
+- 新建 [Mixin_ReplaceDuplicateReplayObjective.java](<src/main/java/com/replaymod/replay/mixin/Mixin_ReplaceDuplicateReplayObjective.java#L16-L39>)：目标ClientPlayNetworkHandler，`@Shadow @Final private Scoreboard scoreboard`；唯一回调`replaymod$replaceDuplicateReplayObjective(ScoreboardObjectiveUpdateS2CPacket, CallbackInfo)`主体只有TODO注释。**未实现**主线程显式检查、任何连接/sender身份门、objective移除或其他兼容逻辑；不取消packet、不重投packet、不引入可变静态状态，也未改变FullSender/Handler运行语义，不能把此空hook签为修好。
+- 精确目标descriptor为`onScoreboardObjectiveUpdate(Lnet/minecraft/network/packet/s2c/play/ScoreboardObjectiveUpdateS2CPacket;)V`；唯一INVOKE目标为`Lnet/minecraft/network/NetworkThreadUtils;forceMainThread(Lnet/minecraft/network/packet/Packet;Lnet/minecraft/network/listener/PacketListener;Lnet/minecraft/util/thread/ThreadExecutor;)V`，`At.Shift.AFTER`、`cancellable=false`、`require=1/expect=1/allow=1`，不捕获局部变量、不禁用remap。由指定`C:/Program Files/Java/jdk-21.0.12.1/bin/javap.exe --system ...`对19.4.3精确named MC/Neo82 JAR再次核对：handler的private final scoreboard存在，目标偏移6调用ensure、偏移49调用addObjective；ensure离线程路径executeSync后抛OffThreadException，正常返回仅主线程。见[handler:5491–5519](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/B-skeleton-20261118-7f2c91/named-handler.javap.txt#L5491-L5519>)、[ensure:25–38](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/B-skeleton-20261118-7f2c91/named-thread-utils.javap.txt#L25-L38>)、[Sponge注解签名](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/B-skeleton-20261118-7f2c91/mixin-annotation-api.javap.txt>)。这只是签名/字节码核验，**不是**编译、真实Sponge变换或动态PASS。
+- 实际注册在 [mixins.replay.replaymod.json:13](<src/main/resources/mixins.replay.replaymod.json#L13>)的**client数组**，紧随Mixin_HandleInputsInReplay，仅一处`Mixin_ReplaceDuplicateReplayObjective`。未改mixins/server、plugin、compatibilityLevel、metadata或其他清单。FullReplaySender、ReplayHandler完全不改，不制造惰性字段/stub；C2按20.3一次接入真实退出收尾。两语言完全不改，交C1按19.4四词组落实。
+- [真实本轮两文件diff](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/B-skeleton-20261118-7f2c91/actual-after-B.patch>)直接比较20.4前像，不用累计HEAD diff：仅新增上述40行Java＋client清单1行。[收尾保护检查](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/B-skeleton-20261118-7f2c91/scope-after-B.json>)为changed=[该清单]、added=[该Mixin]、原567项中566项未变（唯一变化为获批清单）；UI SHA256仍为7cb45c379e36055ddaf81fc5e43f193901d6e1e37e6cd7fb08f2ec6a273563fa。既有源改不撤销。另有[本交接段追加diff](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/B-skeleton-20261118-7f2c91/actual-B-plan.patch>)，旧计划内容原样保留。
+- [JDK环境](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/B-skeleton-20261118-7f2c91/jdk21-environment.txt>)记录指定java/java.home=Oracle21.0.12.1；javac/javap仅`-version`或javap只读反汇编，均exit0；未以此声称继承Gradle JVM已验证。角色契约所需[外部测试占位stub](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/B-skeleton-20261118-7f2c91/BStageTestStub.java>)只在B外部目录，assert true，无生产依赖，**未编译、未执行、不代表任何功能测试**，未新增仓库测试。
+- B未build、未编译、未运行测试/游戏/装包、未Git写、未访问.whale、未接触真实录像/配置/cache/temp或恢复材料。用户“完整重启Minecraft仍隐藏”边界按20.4保留，不宣称进程内lockedPaths是跨进程唯一根因，也不扩围cache/Workspace。真实Mixin变换、objective行为/显示保真、退出释放和冷新JVM对照均交D验证；本B不提前启动C或D。下一步由Lead收到完成通知后串行交C1→C2。
+
+### 20.6 C1内容交接（2026-11-18；objective身份门及指定语言词组）
+
+- C1完整回读19.4/20.3/20.4/20.5、B实际空hook及现有归属链；先读[build.gradle](<build.gradle#L1-L11>)及[NeoForge metadata](<src/main/resources/META-INF/neoforge.mods.toml>)确认既有现代Java21/Loom时代，MC1.21.1/Neo21.1.82/Yarn+patch及所有构建设置不变。角色禁止加载skills，故未加载或冒称加载技能；仅先查[A指定API reference](<C:/Users/zhenz/.dsh/profiles/desktop/node_modules/minecraft-dev/assets/skills/minecraft-neoforge-mod/references/api/mod-bus-events.md>)，其不涵盖scoreboard/连接/Mixin，缺项用指定本机JDK21及精确本地JAR补核。
+- **唯一C1输出子目录：** [C1-content-20261118-a9d43b](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C1-content-20261118-a9d43b>)，在20.4唯一根下新建；所有本片命令cwd及新脚本/前像/日志/classes/收据均在此子目录。未执行旧脚本或旧classes，未覆写旧失败日志。执行前[保护收据](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C1-content-20261118-a9d43b/scope-before-C1.json>)核对567项：相对Lead基线只有B获批清单改变及B新增Mixin，UI保护hash一致；本片保存B后逐源hash及六文件前像。
+- [Mixin_ReplaceDuplicateReplayObjective.java:45–90](<src/main/java/com/replaymod/replay/mixin/Mixin_ReplaceDuplicateReplayObjective.java#L45-L90>)现有实际逻辑：只有ADD_MODE且身份门通过，才在shadow的原版同一scoreboard查询同名旧对象并移除一次，然后回调正常返回，继续原版add，保留新包的displayName/renderType/numberFormat。首次创建/其他名字/UPDATE/REMOVE/其他mode不额外移除；不硬编码名称、不全清board、不catch/cancel/重投包。B完整descriptor、AFTER forceMainThread、require/expect/allow=1和shadow均未改变。
+- 唯一窄`@Unique`实例helper显式检查`mc.isOnThread()`，要求mc当前handler==注入对象、该对象的connection非空及listener==它；安全instanceof复用既有[NetworkManagerAccessor](<src/main/java/com/replaymod/recording/mixin/NetworkManagerAccessor.java>)，要求其channel为open且active的EmbeddedChannel，pipeline.packet_handler==该connection，且pipeline的PACKET_HANDLER_NAME项==当前ReplayHandler.getReplaySender()同一非空对象。全局module/handler/sender空、accessor/channel缺失或任一身份不符皆不兼容，继续原版语义；无新生产accessor/类/静态会话状态，无跨回调缓存。Full/Quick共用同一对象身份门，不依赖sender类型。
+- [zh_CN.lang:367–370](<src/main/resources/assets/replaymod/lang/zh_CN.lang#L367-L370>)仅applied/callbackFailed/saveFailed三处“八项”→“更改项”；[en_US.lang:368](<src/main/resources/assets/replaymod/lang/en_US.lang#L368>)仅callbackFailed的“All eight values”→“Changed values”。其余字节、key/%s、英文applied/saveFailed及未确认落盘语义均不改；两语言hint.tasks仍提八项是明确残留限制，不声称全页已统一。
+- **API核实：** 指定Oracle21.0.12.1的java/java.home/javac版本及javap全部exit0；[MC连接/主线程API](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C1-content-20261118-a9d43b/named-client-connection-thread-api.javap.txt>)、[packet/scoreboard API](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C1-content-20261118-a9d43b/named-scoreboard-packet-api.javap.txt>)、[Netty4.1.97 API](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C1-content-20261118-a9d43b/netty-channel-api.javap.txt>)及[Unique注解API](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C1-content-20261118-a9d43b/mixin-unique-api.javap.txt>)均按19.4精确JAR核实，有[输入JAR指纹](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C1-content-20261118-a9d43b/api-inputs-sha256.json>)。没有新依赖或签名猜测；此层不等于Sponge命中或运行验证。
+- **仅外部API编译：** [编译收据](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C1-content-20261118-a9d43b/compile-api-c1-receipt.json>)及[原捕获日志](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C1-content-20261118-a9d43b/compile-api-c1.log>)记录指定javac21 `--release 21 -proc:none -implicit:none` exit0；复制后的生产Mixin与既有accessor逐字节不变，MC/Netty/Mixin为真实JAR，**只有ReplayModReplay/ReplayHandler/ReplaySender三个应用类型为编译边界stub，未执行它们**。最小CP缺NeoForge Dist注解枚举，产生4条unknown enum constant Dist.CLIENT警告（本机诊断按UTF-8捕获出现乱码，日志原样保留），没有编译错误；不签“无警告”或“完整项目编译通过”。Mixin源码SHA256=`862cc4300b0c073ac2293c96c562fdf081569d23f265ac25936ebb4be379c521`。未运行动态测试、注解处理、真实Sponge变换或Gradle；唯一build仍留D。
+- **真实差异/保护：** [仅C1三文件差异](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C1-content-20261118-a9d43b/actual-C1-only.patch>)比较B后前像；[B+C1相对Lead前像差异](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C1-content-20261118-a9d43b/actual-B-plus-C1.patch>)保留B清单注册；[计划追加差异](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C1-content-20261118-a9d43b/actual-C1-plan.patch>)不改旧段落；[源hash](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C1-content-20261118-a9d43b/source-hashes-after-C1.json>)及[收尾保护收据](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C1-content-20261118-a9d43b/scope-after-C1.json>)检查本片只变Mixin/两语言，清单和FullSender/Handler及其他被保护源不变、旧证据原样、UI仍为19.4.1指纹，语言精确四词组替换，plan仅追加。不是累计HEAD diff，不撤销既有修改。
+- **语义及未测限制：** 移除旧objective会清除它的scores和display slots；仅后继SET_SCORE/SET_DISPLAY等相应包可恢复，后继UPDATE不能恢复，不复制旧状态。C1未做样本score/display审计，不把“不崩”称完整保真。实际Sponge变换、线程调度/当前Full与Quick、旧handler/连接切换/真实联机拒绝、score/display动态矩阵、remap后264兼容及真游戏均待D；没有行为PASS。用户跨进程列表隐藏原因未由本片解释或解决，20.4边界继续有效。
+- C1未改[FullReplaySender](<src/main/java/com/replaymod/replay/FullReplaySender.java>)、[ReplayHandler](<src/main/java/com/replaymod/replay/ReplayHandler.java>)、清单、UI、默认值、cache/Workspace/Service、构建/依赖/metadata、仓库测试、用户真实配置或原录像；未Git写/装包/游戏/读取.whale。**本C1完成后等Lead实际回读，再在独立上下文串行交C2退出释放片，不能并行；C2完成后才交D唯一构建及合并验证。**
+
+### 20.7 C2退出释放内容交接（2026-11-18；实现已接线，动态验收待D）
+
+- C2在Lead实际回读C1后串行开始，完整读取20.3精确算法、20.4重启边界及20.6，并先读既有build.gradle和NeoForge metadata识别现代Java21/Loom时代；固定MC1.21.1/Neo21.1.82/Gradle8.8/Yarn＋patch，不动构建或依赖。角色明确禁止查skills，故未加载或冒称加载技能；先读19.4所列API reference，退出专属契约另读实际Managed/Transactional/Workspace源码及精确本地JDK21/Studio API，没有使用新模板API。
+- **本片唯一新输出子根：** [C2-content-20261118-c7f042](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C2-content-20261118-c7f042>)；自建标记后cwd切入此根，所有本片命令cwd、前像、复制源、classes、脚本、日志/收据均在此子根。未运行旧script/旧probe/classes；仅只读解析Lead列出的旧javac命令JSON定位依赖，删去全部旧夹具CP，仅保留本项目生产编译依赖和实际缓存JAR。既有production build/classes只作javac输入，不执行或覆写。
+- **FullSender实际状态/helper：** [FullReplaySender.java](<src/main/java/com/replaymod/replay/FullReplaySender.java>)新增this保护的replayInputClosePending；closeReplayInputLocked只在当前对象真实close成功后清ref/pending，失败保留原对象并记录每阶段首错。非terminal异常在该次this范围内退休本次reader/保留restartPending，不在旧worker解锁后的finally关新worker流；pending在下一次读者入口先重试，失败不继续读/覆盖。sync/async EOF均真实退休，EOF不terminal、不stop lease、不advanceGeneration；两个原restart close点共用helper，普通mode/epoch交接仍保留合法stream/nextPacket。
+- **单closer及线性化：** 短packetCloseStateLock仅维护请求序号/单packetCloser/packet与file完成状态、业务primary及首packet/file失败；请求不取this或做close，启动失败保留请求/失败线程引用并日志/抛回。daemon worker取得this排空时不持短锁或modeLock，仅在此屏障内关packet流/清terminal预读；退出this后才处理保源意图/ReplayFile.close及日志。Managed.close返回而isReleased=false仍PENDING并重试；非Managed仅标close调用返回，不宣称服务锁释放。失败/PENDING以1秒起、上限30秒退避，新请求可唤醒；请求发布和退出判定使用同一短锁，晚到file请求不会丢失。per-stage首cleanup只附加一次，不以GC/覆盖流/删锁强制释放。
+- **保源意图不是备份收据：** worker在Managed最终file阶段先preserveRecovery(primary)，成功返回后只登记一次replayRecoveryIntentRegistered；实际Workspace.saveFailed会将失败record-write直接suppressed到primary，故不能每次file-close重试重复登记而无限增长异常链。真正protect/finish和release仍完全由未改adapter裁决。日志记录阶段/retrying/业务primary及可得recovery路径；路径出现不等于保护已成功。packet-close失败仍进入file-close阶段，adapter可保持closing门；永久读者/close失败继续安全持锁和可达重试，不能签release成功。
+- **FullSender生产接线：** terminateReplay在terminationCleaned CAS之外的finally请求packet close，保留一次events/channel及原resource-pack release协议；runAsyncSender增加覆盖退场的terminal-only请求finally。sync任务在this内重查terminal，shutdown保留已排队任务finally置done；submit拒绝仅在terminal已成立时按取消处理，否则仍抛；sendPacketsTill和显式setSyncModeAndWait等待遇terminal退出。没有新增MC join/await/sender长monitor等待，也没有改原session/generation/connection/lease门、forward rush或quick协议。
+- **Handler实际接线：** [ReplayHandler.java](<src/main/java/com/replaymod/replay/ReplayHandler.java>)仅endReplay及其私有进度/失败helper：closing/closed事件调用前标attempted，save调用前标attempted，Quick unregister仅成功才标记；保留constructionFailed/endInProgress/ending/旧handler身份门。正常save仍原同步I/O，并保留标记/时间线编辑。移除本地channel.close().awaitUninterruptibly，仅关本handler本地channel。任意stop/callback/terminate/Quick/save失败保留业务primary原类型，在finally分别尝试terminate与requestReplayFileClose(primary)，前一步失败不跳过后一步，独立首cleanup suppressed不覆盖primary。
+- **重试语义已改变且不冒称旧F1通过：** 一旦file-close已请求，后续endReplay只收尾，绝不再次save或重播事件；首次失败未做的本地UI收尾可在身份门下重试，closed事件也最多尝试一次，不能声称抛错事件组后续listener都运行过。endCompleted只表示逻辑退出，重复调用仍可唤醒file收尾，不代表实际release。closer只捕获旧sender/file，不读取或清新handler/world/loader；原disconnect/timer/forceStop/screen重入身份检查不变。
+- **实际编译/API层：** [最终整两源编译收据](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C2-content-20261118-c7f042/v5-compile-whole-C2-receipt.json>)及[原日志](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C2-content-20261118-c7f042/v5-compile-whole-C2.log>)：指定Oracle21.0.12.1，--release21/-proc:none/-implicit:none及空sourcepath，完整未裁剪两源复制件对真实named MC/Neo82、Studio和既有生产compile-only类编译exit0、输出无诊断；**无stub、未执行任何行为，不等于全项目/Gradle通过**。最终[生产字节码](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C2-content-20261118-c7f042/v5-production-bytecode.javap.txt>)及[JDK/Managed/Studio API](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C2-content-20261118-c7f042/v5-managed-studio-jdk-api.log>)仅静态javap、均exit0；没有动态owner方法PASS。首轮脚本在java版本命令exit0后因Python控制台GBK打印失败退出，修捕获打印后使用v2/v3/v4/v5分名保留日志，非生产编译失败，未覆写失败日志。
+- **本片指纹/真实差异：** FullSender SHA256=`0d79e9af57189b39b2454c244b2f29deca1e5af8baec7a8baa86fa058bbd9b6e`；Handler SHA256=`a417d29b5379cf89a64d84e158a66e2bae2bdaa18ad77febbf72919e9ecd7c11`。相对C1后前像的[两源实际diff](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C2-content-20261118-c7f042/actual-C2-only.patch>)、[本段追加diff](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C2-content-20261118-c7f042/actual-C2-plan.patch>)、[源hash](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C2-content-20261118-c7f042/source-hashes-after-C2.json>)与[收尾保护收据](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C2-content-20261118-c7f042/scope-after-C2.json>)核对本片仅两源变化、plan仅追加，C1 Mixin/两语言及B注册不变，568项既有源/资源/构建/日志中其余566项不变，src无新增文件；UI仍`7cb45c379e36055ddaf81fc5e43f193901d6e1e37e6cd7fb08f2ec6a273563fa`，git diff --check exit0（仅既有LF/CRLF提示）。不是累计HEAD差异，不撤销既有改动。
+- **取证输入漂移如实披露：** [最终审计](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C2-content-20261118-c7f042/v5-audit-C2.json>)继承C1的45项旧证据manifest复核44项一致；唯一不同是LEAD-VERIFICATION-INPUTS.md，C2首读29行、后读36行，新增Lead冷JVM基线说明（C2未写该输入）。首次“全旧证据相等”断言因此失败，[失败说明](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/C2-content-20261118-c7f042/audit-first-failure.txt>)保留，未伪称45项全未变。新Lead合成core冷JVM对照不替代本片真实owner矩阵，更不等于复现/排除用户跨进程缓存问题。
+- **明确未测/交D：** C2没有运行Gradle、生产动态探针、旧7项LeakProof、游戏或安装；20.3.7全部真实Full/Handler线程/EOF/故障/reentry/adapter重开矩阵仍须D新根执行，不能拿此编译或原7项代替，旧save失败后二次重save F1合同已被本节新语义取代。保留同cache/tmp冷新JVM对照，不清用户cache/temp、不删锁。完整Minecraft重启仍隐藏不是纯内存lockedPaths可跨JVM延续的证明，本片不声称解释或解决全部列表隐藏；若复现表外持久缓存问题停报，不改Service/adapter/Workspace/Viewer。
+- **边界与下一步：** 原同步save以及表外closing回调（含SimplePathing等待）仍可能阻塞，不宣称整个endReplay零卡顿。metadata/markers/FullSender构造、startReplay新file所有权、兼容警告取消/Esc/屏幕替换及GuiHandler兜底缺口仍未覆盖。未改表外生产/资源/测试/设置UI/构建/依赖/metadata/libs、真实配置/录像/.env/.whale，无Git写；**本C2完成先等Lead实际回读，再由Lead交D唯一build和合并验收，C2不启动D。**
+
+### 20.8 Lead合并实源复核与D冻结入口
+
+Lead已实际读取C1新Mixin92行、四词组diff、C2两源546行diff和Handler完整endReplay，回读20.6/20.7收据；本轮 [Lead范围核对](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/scope-lead-after-C2.json>) 为相对基线五既有文件改变＋唯一新Mixin，其余562保护项hash不变，UI仍7cb45c379e36055ddaf81fc5e43f193901d6e1e37e6cd7fb08f2ec6a273563fa。现在才串行进入D，不把外部API编译当功能验证。D自己的新子根内可以修六实现/资源文件中的明确小缺陷，其他文件仍只读。
+
+- Lead当前总根的旧输入至此冻结，不再修改LEAD-VERIFICATION-INPUTS.md；C2期间该文件新增冷JVM说明是Lead自己写的可定位差异，44/45保留不是旧证据全不变，已如实披露。D新输出仅总根新D子目录；完成后Lead仅新建Lead-final子目录和更新本计划，不改D日志。
+- Lead新增 [真实录像保护收据](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/real-replay-input-protection.json>)：两份用户MCPR仅读ZIP CRC全部entry通过，源SHA256/size/mtime前后不变（18_52_30 sha94fc745ec251d886f80107c6e78c24a2475afab9c53ad72d1857190b668be1c7；18_54_50 shac8ee41847b11544d8fe8fe5069ee15f09ef138d36019415a019667f382ffef36）。不是协议可播证明，D若需生产方法数据用隔离副本或只读原字节，不得在原路径调用可写Service/ZipReplayFile或save/cleanup。
+- 新 [冷进程基线](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/lead-cold-baseline/receipts.json>) 已执行：两个独立PID8912→5484，第一进程故意不关闭合成真实packet reader后退出，第二进程保留完全同cache/tmp/sentinel，实际Service metadata读取成功。它只编译当前core/adapter/ReplayStudio及MC/GUI边界stub，明确不含C2正在改的Full/Handler；**不是C2生产owner验收，亦未复现用户实际跨进程隐藏**。D仍补20.3全部生产owner矩阵及新cold对照；未复现不能写成已排除缓存因素。
+- Lead复核关注点交D：关闭线程的责任交接与晚到file-close请求不得丢；“单closer”应验证资源操作单责任/无并行重复close，不能仅用逻辑完成旗标当物理release。末流close抛在adapter.finishClose后半段、preserveRecovery登记失败/诊断获取失败、Handler先save失败后再收尾/原始primary与cleanup错误、回调重入新handler等都需要边界明确的实际生产方法测试。正常切换mode/epoch与合法预读不能被旧worker finally退休；旧F1语义不得再签原样通过。真实Sponge目标变换/运行边界和用户264实例未测必须单列。
+
+### 20.9 D真实编译审查与分层验证（2026-11-18；候选交Lead复核，不签真游戏验收）
+
+- D完整回读19.4/20.3/20.4/20.6/20.7/20.8后，唯一create-new输出子根为 [D-verify-20261118-e618d4](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/D-verify-20261118-e618d4>)；[完整报告](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/D-verify-20261118-e618d4/REPORT.md>)、[证据索引](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/D-verify-20261118-e618d4/EVIDENCE-INDEX.md>)包含每层边界/失败/未测。角色禁止加载skills，故未加载；按指定reference与精确本机JAR核验。未改六文件生产实现，C1/B/C2源指纹保持，未改表外生产/测试/构建/配置、未Git写/装包/启动游戏/碰whale。
+- **唯一实际mc_gradle build成功36s**，参数严格为 `build -Djava.io.tmpdir=C:\Temp --console=plain`、timeout1200000；没有第二次/clean/tasks/help/refresh/-x test/shell wrapper。[工具原文](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/D-verify-20261118-e618d4/mc_gradle-build-tool-original.txt>)与[收据](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/D-verify-20261118-e618d4/mc-gradle-receipt.json>)保留。工具canonical渲染对exit0不打印marker；本次BUILD SUCCESSFUL且无非零/signal/timeout marker，按实际renderer解码exit0/timedOut=false，未声称工具另暴露了JSON字段。`test NO-SOURCE`绝非JUnit成功；Loom过旧、deprecated/unchecked、Gradle9、WorldRenderer/JOML既有诊断原样保留。继承JAVA_HOME为空，但实际Windows wrapper首Oracle javapath经cmd实测为指定Oracle21.0.12.1，不是PATH第二项25；所有外部Java工具显式指定JDK21。
+- **新non-dev产物** [reforgedplaymod-1.21.1-0.3.1.jar](<build/libs/reforgedplaymod-1.21.1-0.3.1.jar>) 为 **17,626,514B / SHA256 3328e9958090a2d51c565eaea674cb19512af90c761a2f7d889a9aa2b843c42a**；ZIP全entry CRC、唯一client注册、两语言精确源字节通过。[最终产物收据](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/D-verify-20261118-e618d4/artifact-receipt.json>)及11项ASM接线断言确认mapped descriptor/ensure/shadow/require=expect=allow=1、terminal/async finally请求、sync退休、Managed实际release检查、Handler一次save/event callsite和无本地join/await。旧5fbc产物仅历史，不能再当当前包。
+- **Objective分层PASS**：未改生产callback/helper身份矩阵41项，正例用当前完整Full/Quick类型Unsafe分配作身份对象，真实Netty；MC/scoreboard/application边界stub明确，不冒充变换后目标执行。另在实际用户实例Mojang基础JAR、精确MC声明依赖DFU8和client-extra资源下合法bootstrap，实际Scoreboard 7项通过：旧多holder/多槽清理、其他objective/team保持、新display/render/format、UPDATE不恢复、后继显式score/display恢复。named bootstrap缺FMLLoader仍BLOCKED；Mojang首试缺语言资源失败后准确补外部CP成功，原失败不删。
+- **真实Sponge PASS**：新编译独立host对当前named Neo82两目标、最终non-dev JAR-first的Mojang82两目标和actual264实例基础srg两目标均真实MixinTransformer命中；唯一hook严格位于ensure成功之后/原版add之前，accessor和shadow映射成立。standalone配置省略项目plugin/其它mixins，**不等于NeoForge264 launcher/全mod顺序**；尚未实际执行变换后handler的off-thread调度重入，不能拿直接callback stub替代该层。
+- **完整owner生产行为PASS**：79项实际未裁剪Full/Handler/core/Service/Managed/adapter/Studio执行（MC/GUI/事件注册/Quick边界stub、Unsafe跳过Handler构造）；另28项真实异步paused/长timestamp/autoRead/runSync终止、正常mode/prefetch、submit竞态及真实adapter末流close已关delegate后workspace.finish故障/保锁/引用保留/重试release；另12项preserve意图失败、诊断获取失败、Handler close请求启动故障及Quick注销故障注入重试。断言观察真实close/Managed.isReleased及实际FileLocked→preview，不以isShutdown/flag当release。idle/active不可中断reader、late file request、EOF/close失败、业务primary/suppressed、事件attempt一次、save一次、重入新会话隔离、正常可写编辑保存均有新收据；故障边界细分见报告，有限探针不声称覆盖所有线程启动/永久失败/穷尽竞态。
+- **回归PASS**：新编译资源包lease/session19组；Quick0/targetzero/forward/intent/repeat/重建channel/readeronly/prefetchonly共9个独立执行（实际Handler/Full/Studio，Quick/decoder/restart边界明示）；UI默认59＋原UI323实源断言通过，英文只按批准措辞更精确期望，旧断言未删弱，fixture根全部改D。一次Quick聚合外层240s超时，7份已完成exit0保留、在途readeronly退出码未知不签通过；readeronly/prefetchonly另编号新fixture重跑exit0。早期工装编译/路径/协议表/pause fixture错误和失败日志保留，部分最早Python控制失败只有ops返回、未实时重定向，证据缺口在报告明示，未编造不存在的raw日志。
+- **两份真实录像完整新审计**：14,954/9,367个包逐包sourceZIP→私有副本一致；score/reset/display/objective全部解码并要求每payload消费完毕。事件51=23objective+2display+21score+5reset；42=14objective+2display+21score+5reset。第二CREATE索引370/363；旧7行/slot1被有意退休，后继372/365恢复display，414–422/748–756重建9行lobby分数（均timestamp0），后续reset演化和格式也留存。五个旧Limbo holder最终不复存，不盲目复制到新段；无未处理raw/server oracle，**完整画面保真和生成重复源头仍未确认**，不是“不崩即保真”。用户原件只读hash/mtime/CRC保持，无原路径Service/Zip/save/清理。
+- **新owner冷JVM对照**：首PID5784实际owner失败收尾/release＋正常可写save，另新PID15968保留同一fixture/cache/tmp/sentinel，真实Service/list-equivalent metadata成功，未清cache/tmp。**未复现用户完整Minecraft关闭重启仍隐藏**，不等于排除所有缓存因素，也不再把纯内存lockedPaths说成跨已结束JVM延续。
+- **合同及未覆盖项保持**：file-close请求后仅重试收尾，绝不重save，不套旧F1“二次重save成功”；恢复材料保留不代表save成功。同步save及表外callback仍可能阻塞；永久reader/close失败保守持锁，不强删lockedPaths。构造/startReplay/兼容取消/GuiHandler其它所有权缺口未修；真实全mod/264游戏、两录像渲染及sidebar、进退切模式/拖动/真实联机和完整重启症状仍待用户/Lead验收。
+- [最终范围/保护](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/D-verify-20261118-e618d4/final-protection.json>)、[最终源hash](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/D-verify-20261118-e618d4/final-source-hashes.json>)、[相对本轮源前像完整patch含新Mixin](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/D-verify-20261118-e618d4/actual-current-round-full-sources.patch>)和[D仅追加plan差异](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/D-verify-20261118-e618d4/actual-D-only.patch>)供Lead复核；567基线/六实现资源白名单、旧证据manifest和UI sha7cb45c379e36055ddaf81fc5e43f193901d6e1e37e6cd7fb08f2ec6a273563fa保持。**可交付：是，作为新构建隔离验证候选；不是已完成真游戏/用户故障验收。** D仅回报同plan绝对路径及报告，等待Lead复核，不自行goal完成、安装或提交。
+
+### 20.10 Lead独立复核、最终交付与未解决边界
+
+- Lead实际回读D完整REPORT/证据索引/原mc_gradle输出及20.9；认可其分层结论而不是拿分项数拼成“全游戏测试通过”。D全部阶段完成，无生产修补；A/B/C1/C2/D串行链到此结束，没有待启动的实施阶段。
+- Lead在只写新 [Lead-final](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/Lead-final>) 子目录执行独立终验：相对原基线五既有源/资源改变＋一个新Mixin，562表外项hash未变；两语言仅精确四词组变化；UI源仍7cb45c379e36055ddaf81fc5e43f193901d6e1e37e6cd7fb08f2ec6a273563fa。两份用户原录像SHA256/size/mtime仍与20.8收据全部一致，未save/清理/改名原件。工具git diff --check通过，Git始终仅status/diff/log。
+- 独立核对当前non-dev ZIP全部CRC、一次注册、两语言打包字节与源一致；实际final javap再次确认新hook身份门、packet/file close worker与请求接线、Handler.endReplay无本地await或直接ReplayFile.close，前序optional注册/core.runLater/默认UI初值逻辑仍在。未在D后改生产文件、重建或洗掉D失败/中断证据。
+- 当前唯一交付 [reforgedplaymod-1.21.1-0.3.1.jar](<build/libs/reforgedplaymod-1.21.1-0.3.1.jar>) **17,626,514B**，SHA256 **3328e9958090a2d51c565eaea674cb19512af90c761a2f7d889a9aa2b843c42a**，与D最终收据一致。Lead [真实完整六文件patch](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/Lead-final/complete-approved-source.patch>) 包括untracked Mixin，非累计HEAD差异；[独立最终收据](<C:/Temp/reforgedplay-objective-A-20261118-6d9a3c/Lead-final/FINAL-RECEIPT.json>) 和final-artifact-javap.log保留核对层边界。构建原文36s、test NO-SOURCE及原诊断保持，不另编造JUnit/真实游戏收据。
+- 功能交付覆盖：未改设置不写/只提交更改项（先前18.4已实现，本次原样保留并回归），指定词组更正；当前回放连接重复objective局部兼容；退出及EOF实际packet reader退休、保源关闭请求及真实Managed释放/重开。没有删除缓存/锁或禁用原编辑保存；失败后请求close即只重试收尾、不再重save的合同变化明确，恢复材料不是保存成功证明。
+- **用户完整重启Minecraft仍隐藏的具体症状没有在隔离对照中复现，因此不能声称已完全解决或已排除缓存。** 新同cache/tmp冷JVM对照成功仅签该层。真实264全mod顺序、变换后handler线程重入、完整sidebar/画面保真与用户实例仍待替换包实测；原EXR不兼容、启动/构造/兼容取消等未授权所有权缺口仍保留。若更新后仍隐藏，应保留当次缓存/恢复材料，并将该次新日志另名提供，不先删缓存掩盖。
+- 交付操作只声明当前build输出供用户关闭游戏后替换唯一旧JAR（不要并存）；不自动安装、commit或改游戏真实设置。此轮实现/隔离验证范围完成，后续真实游戏验收不冒充已完成。
+
+## 21. 服务器回放团队 REMOVE 断连、单人“继续游戏”卡死：A 只读诊断及待批准最小范围（2026-11-18）
+
+### 21.1 授权、时代、交付和证据边界
+
+- **本节是新诊断/候选，不是新实现授权。** 本轮只追加本计划；不启动 B/C/D，不改 Java/资源/依赖/构建，不构建、不编译/运行仓库测试、不安装、不 Git 写、不触碰 `.whale-craft`、游戏设置、录像、cache/tmp/锁或旧证据。19–20 节实施与有限验证历史完整保留；其中 PASS 不提升为“服务器回放/单人卡死已解决”，也不据时间先后将此次卡死归咎旧六文件。
+- 先回读 [构建](<build.gradle#L1-L11>)、[属性](<gradle.properties#L6-L20>)、[wrapper](<gradle/wrapper/gradle-wrapper.properties#L1-L7>)、[NeoForge 元数据](<src/main/resources/META-INF/neoforge.mods.toml>)及库/源码布局：**MC1.21.1 / NeoForge21.1.82 / Java21 / Architectury Loom1.7-SNAPSHOT / Gradle8.8 / Yarn1.21+build.1＋既有NeoForge patch1.21+build.4**。现代 Java21 既有 Loom 工程；不 scaffold、不迁移 ModDev、不升级映射/平台。报告实际 NeoForge21.1.264、Microsoft Java21.0.8；本机反汇编明确使用已安装 Oracle21.0.12.1，不把两者说成相同运行环境。
+- 本 A 角色上级规则明确禁止读取 skills，故**没有加载 minecraft-java-build / minecraft-neoforge-mod**，没有冒称满足用户该子要求；缺失 API 直接核项目实际二进制＋官方/上游文档，不套用新模板。Lead 可在自己权限内补该记录。
+- **证据文件限制如实披露：** 本 A 上级仅准写本计划，禁止另建任何文件/目录，因此用户指定的 `C:/Temp/reforgedplay-team-hang-A-20261118-204010` **本 A 未创建、未写入**。本轮 javap/stdout 原始返回在工具会话保留；关键输入、结果、纠错和精确偏移收录本节，不伪造一个 raw 日志路径。Lead 如需独立证据包，可由其权限另行导出该会话原文到指定新根，不能称本 A 已完成。旧证据未覆写；本轮未运行产生非零退出的命令，首轮 GUI 方法猜测未命中正确 callback 的输出见21.5保留，不删改成首次就正确。
+- 没有访问原录制目录，也没有打开/复制/保存任何录像：新报告和静态代码已足够确定直接抛错点；包流生成原因及单人卡死需要另一层证据，不能为凑诊断遍历用户盘。
+
+### 21.2 新报告能直接确认什么、不能确认什么
+
+已逐项读取新 [disconnect 报告](<disconnect-2026-11-18_20.40.10-client.txt#L4-L38>)：
+
+1. 时间字符串为报告原文 `2026-11-18 20:40:10`（时区未确认，不跨时区换算）；Render thread 的 `Scoreboard.removePlayerFromTeam` 抛 `IllegalStateException: Player is either on another team or not on any team. Cannot remove from team '9599_8b96'.`，调用方 `ClientPacketListener.handleSetPlayerTeamPacket`，输入 `clientbound/minecraft:set_player_team`。该异常进入 `onPacketError`，足以解释此次服务器录制回放1–3秒断连的**直接失败点**。
+2. 报告目标类的 Mixin 清单包含现有 `Mixin_ReplaceDuplicateReplayObjective`；这仅证明此类的该 Mixin 被列入变换信息，不证明其 callback 在本次具体包执行，也不证明旧 objective 问题已彻底解决。此次不是同一个 objective 异常；不撤掉旧兼容，也不假定“旧改动造成新异常”。
+3. 运行基础字节码核实后可推断：抛错来自**移除成员**分支，而非整队 REMOVE。该分支对应 TeamS2CPacket 的 packetType4；整队删除是packetType1，二者不能混为一谈。失败当时该成员对目标 Team 对象不匹配（可能 null，也可能另一队）；报告没有成员名字、实际 current team、完整 packet payload/索引/时间戳，**不能确定是哪一种**。
+4. **尚未确认生成源：** 未新审计真实录像团队包，不知道文件本身已有过期/重复REMOVE、快进/重启状态差异、录制快照/包序问题、Quick重建、服务器/其他mod变换哪一项导致不匹配。此处不得套用19节“重复objective确实写在文件中”的结论到team。
+5. 报告的 [内存/JVM信息](<disconnect-2026-11-18_20.40.10-client.txt#L62-L105>) 为 `-Xmx1536m`、`java.io.tmpdir`空间探测ERR；这只是这份服务器断连报告的环境事实，**没有OOM/GC停顿或单人磁盘故障证据**，不以此代替单人卡死根因。Dynamic Lighting 附加段也不是根因证据。
+
+### 21.3 本轮实际 JAR/API 核实与可复查摘要（不是新测试 PASS）
+
+工具固定 `C:/Program Files/Java/jdk-21.0.12.1/bin/javap.exe`，`--system C:/Program Files/Java/jdk-21.0.12.1`；实测 `javap -version` 原文 `21.0.12.1`。只执行 `-p -c` / `-p -v` /签名读取，未运行生产方法。输入是：
+
+- **N 编译 named**：[实际 MC1.21.1/Neo82 JAR](<C:/Users/zhenz/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/neoforge-21.1.82-minecraft-merged/1.21.1-loom.mappings.1_21_1.layered+hash.426444933-v2-neoforge-21.1.82/neoforge-21.1.82-minecraft-merged-1.21.1-loom.mappings.1_21_1.layered+hash.426444933-v2-neoforge-21.1.82.jar>)。
+- **R 用户实例基础 srg/Mojang**：[实际 client 基础 JAR](<D:/Jerry's/MCJE/.minecraft/libraries/net/minecraft/client/1.21.1-20240808.144430/client-1.21.1-20240808.144430-srg.jar>)。这是用户实例基础类，不是运行时 Neo264＋全部mod变换后的内存导出。
+- **S ReplayStudio**：[项目 vendored JAR](<libs/ReplayStudio-master-SNAPSHOT-slim.jar>)，本轮重新 SHA256=`e034b0a39cc906ba38c401a13c09bf6fca5512ecb658428380994f71b7d48250`。
+- **E 已有 MixinExtras0.3.5**：[本机依赖 JAR](<C:/Users/zhenz/.gradle/caches/modules-2/files-2.1/io.github.llamalad7/mixinextras-neoforge/0.3.5/ef3ffcf309dae656517b2f120189b1c9b21737dd/mixinextras-neoforge-0.3.5.jar>)；未下载/新增依赖。
+
+| 核实对象 | 本轮实际字节码/签名结果 |
+| --- | --- |
+| N `ClientPlayNetworkHandler.onTeam(TeamS2CPacket):void` | 偏移6先 `NetworkThreadUtils.forceMainThread`；9–88获得/新建目标队及未知队警告早退；89–103正常应用team属性；106–167成员ADD；170–221成员REMOVE循环；**218唯一** `Scoreboard.removeScoreHolderFromTeam(String,Team):void`；224–236保留整队REMOVE。 |
+| R `ClientPacketListener.handleSetPlayerTeamPacket(ClientboundSetPlayerTeamPacket):void` | 同样偏移6ensure、218唯一 `Scoreboard.removePlayerFromTeam(String,PlayerTeam):void`、236 `removePlayerTeam(PlayerTeam):void`；局部变量槽与N有差异，方案不捕获locals。 |
+| N/R Scoreboard两参remove | 原文摘要：`0 aload_0; 1 aload_1; 2 invokevirtual getScoreHolderTeam/getPlayersTeam; 5 aload_2; 6 if_acmpeq 26; 9 new IllegalStateException; ... 25 athrow`；**身份一致才**在26后删map/目标队成员表。不能用队名字符串相等替代 `==`。 |
+| N `TeamS2CPacket.getPlayerListOperation()` | packetType0/3→ADD，4→REMOVE，其余null。`getTeamOperation()`仅0→ADD、1→REMOVE，其余null。 |
+| E `WrapOperation` / `Operation<R>` | 实际存在 `method():String[]`、`at():At[]`、`remap():boolean`、`require()/expect()/allow():int`；`Operation<R>.call(Object...):R`。候选void调用的签名为 `(Scoreboard,String,Team,Operation<Void>):void`，由上游约定和本地API共同确认，不凭新版文档捏造。 |
+| S `ReplayInputStream.readPacket()` / `close()` | readPacket偏移1调用 `fillBuffer`、8 Queue.poll；fillBuffer偏移16/24从真实InputStream读两个int，68 writeBytes(InputStream,length)，425 ViaVersion convert；close偏移4直接调用 underlying `InputStream.close()`。API不承诺非阻塞或可中断，不能假设只关flag即可返回。 |
+
+网络核实日期2026-11-18，均实际 fetch 正文：
+
+- [Yarn1.21+build.1 Scoreboard](<https://maven.fabricmc.net/docs/yarn-1.21+build.1/net/minecraft/scoreboard/Scoreboard.html>)：公开 `getScoreHolderTeam(String):@Nullable Team`、`removeScoreHolderFromTeam(String,Team):void`、`getTeam(String)`；这是配置的Yarn基线网页，**1.21.1/Neo82精确存在性以上述N为准**。
+- [MixinExtras 上游 WrapOperation 文档](<https://github.com/LlamaLad7/MixinExtras/wiki/WrapOperation>)：实例调用收到receiver、原参数及Operation，调用original时传receiver和原参数；允许有意不调用以bypass局部操作，多wrapper可链式组合，优于硬Redirect的独占替换。网页含新版其它能力，本方案只取本机0.3.5已核实的INVOKE wrap，不使用Expression/WrapMethod等未核能力。
+- [Oracle JDK21 jcmd 官方手册](<https://docs.oracle.com/en/java/javase/21/docs/specs/man/jcmd.html>)：同机器/有效用户，`Thread.print -l`打印线程及并发锁，impact Medium；不声称零扰动，也不将“未检测到Java monitor deadlock”视为无逻辑等待。
+
+本轮只读指纹收据：当前 [non-dev JAR](<build/libs/reforgedplaymod-1.21.1-0.3.1.jar>)仍 **17,626,514B / SHA256 `3328e9958090a2d51c565eaea674cb19512af90c761a2f7d889a9aa2b843c42a`**；并非本轮新构建，也未核用户实际安装文件hash。源/报告SHA256如下，后续实施以此再冻结而非直接引用旧hash：
+
+| 输入 | SHA256 |
+| --- | --- |
+| [FullReplaySender](<src/main/java/com/replaymod/replay/FullReplaySender.java>) | `0d79e9af57189b39b2454c244b2f29deca1e5af8baec7a8baa86fa058bbd9b6e` |
+| [ReplayHandler](<src/main/java/com/replaymod/replay/ReplayHandler.java>) | `a417d29b5379cf89a64d84e158a66e2bae2bdaa18ad77febbf72919e9ecd7c11` |
+| [原 objective Mixin](<src/main/java/com/replaymod/replay/mixin/Mixin_ReplaceDuplicateReplayObjective.java>) | `862cc4300b0c073ac2293c96c562fdf081569d23f265ac25936ebb4be379c521` |
+| [新 disconnect 报告](<disconnect-2026-11-18_20.40.10-client.txt>) | `0a9b83013b9e8b8316f2a0825e7afac20c3ac46910ed902eaf855d606650f303` |
+
+### 21.4 首选候选：仅当前 replay 连接、仅不匹配成员 REMOVE 的局部兼容（待用户批准）
+
+**不改 Scoreboard 全局行为，不跳整个Team包，不catch IllegalStateException，不把set_player_team加入BAD_PACKETS，不修写录像。** 建议只增加一个client Mixin，wrap N的 `onTeam(Lnet/minecraft/network/packet/s2c/play/TeamS2CPacket;)V` 中唯一 `Lnet/minecraft/scoreboard/Scoreboard;removeScoreHolderFromTeam(Ljava/lang/String;Lnet/minecraft/scoreboard/Team;)V` 调用。
+
+1. 首选现有 MixinExtras0.3.5 `@WrapOperation`，`require=1/expect=1/allow=1`、保持remap；无需新增shadow scoreboard、无需捕获local/重写packet。其调用点天然处于forceMainThread正常返回之后且只在成员REMOVE分支，不额外HEAD取消或重复调度。若实际变换不命中/冲突/初始化不可用，**停报**，不悄悄改require0、加依赖或全局吞异常。硬Redirect只作为需另报的备选，不能未经核验切换。
+2. 在新Mixin内部使用与 [现有 objective 身份门](<src/main/java/com/replaymod/replay/mixin/Mixin_ReplaceDuplicateReplayObjective.java#L59-L90>)等价的严格判定（可复制窄私有helper，不顺便重构旧文件）：当前MC主线程；mc当前handler===this；connection当前listener===this；现有NetworkManagerAccessor取channel；open/active EmbeddedChannel；当前ReplayModReplay/ReplayHandler存在；pipeline的packet_handler===connection、ReplayHandler.PACKET_HANDLER_NAME===当前active sender（Full或Quick）。只见“有ReplayHandler”或EmbeddedChannel不够，拒绝旧handler/旧sender/真实网络连接。
+3. wrap收到**实际receiver scoreboard、成员String、目标Team**。当且仅当身份门通过且 `receiver.getScoreHolderTeam(member) != targetTeam` 时，略过**这一次成员移除**，不改任一map、不调用clearTeam、不移除其当前另一队、不尝试“先加回目标再移除”、不补造队。除此之外 `original.call(receiver, member, targetTeam)` **恰一次**，传播其原异常，不catch。查的是原调用同一board，而非可能已切换的global world scoreboard。
+4. 同一包其他成员继续循环：当前属于目标队的成员正常移除；已无队/在另一队的成员保持。team属性、CREATE、UPDATE、成员ADD、unknown team原warn/return、整队REMOVE及包后续动作全部原样；不复制目标team集合“清残留”。特殊字串（空格/颜色码/sidebar holder）按原String，不当作在线玩家名过滤。
+5. 兼容只定义“这个过期/不匹配REMOVE不终止回放”，**不保证团队状态绝对保真或消除生成源**。服务器/真实单人游戏连接仍走原版异常语义。两参remove其它调用点（包括add内清旧队）不受此wrap影响。
+6. 当前工程没有其他生产WrapOperation使用，[历史 MixinExtrasInit](<src/main/java/com/replaymod/core/MixinExtrasInit.java>)只是注释。已有E二进制不等于实际Neo264完整launch成功；后续D须核loader自动初始化/最终产物实际可见性，不为此在本轮改bootstrap或依赖。保持旧objective Mixin和前序optional/UI/EOF/异步close全部原字节，除非另获带证据的明确扩围。
+
+### 21.5 单人“继续游戏”卡死：静态风险清单，不冒充真实线程诊断
+
+**当前没有卡死时线程dump、单人样本/时间点、CPU趋势或对应新日志，不能确认死锁、不可中断I/O、渲染busy-loop、暂停误认、内存压力，不能确定由旧修改引入。** 本轮没有启动或attach游戏。
+
+- **先区分按钮。** [GuiHandler](<src/main/java/com/replaymod/replay/handler/GuiHandler.java#L76-L90>)打开GameMenuScreen时主动 `setReplaySpeed(0)`；[继续/暂停overlay](<src/main/java/com/replaymod/replay/gui/overlay/GuiReplayOverlay.java#L101-L113>)另有play按钮，暂停时才设非零speed。N的GameMenuScreen `RETURN_TO_GAME_TEXT`绑定bootstrap0→**method_19845(ButtonWidget)**，实测callback偏移5 `MinecraftClient.setScreen(null)`、15 `Mouse.lockCursor()`，没有直接endReplay/save/切sync/play调用。因此“Esc菜单继续游戏”不等同overlay“恢复回放”；若镜头/UI仍响应而时间不走，首先记录是否只是回放仍暂停，不冒称硬卡死。
+- **取证纠错保留：** 首轮静态筛选曾查看 `method_19836(ButtonWidget)`，实际输出为新建NeoForge ModListScreen并setScreen，**不是**继续按钮；后续通过`javap -p -v` BootstrapMethods解析到19845，再取其真实bytecode，不按猜测方法名给结论。所有命令退出未报错，属于目标选择纠正而非生产故障，不编造不存在的失败raw文件。
+- **Sender monitor跨慢动作（静态事实）。** [异步循环](<src/main/java/com/replaymod/replay/FullReplaySender.java#L1267-L1421>)在sender监视器内读真实ReplayInputStream、暂停sleep、时间戳sleep、autoRead等待和EOF close，并可 [runSync pause/restart](<src/main/java/com/replaymod/replay/FullReplaySender.java#L1770-L1806>)。实际Studio `readPacket→fillBuffer→InputStream/解压/转换`、`close→InputStream.close`没有非阻塞保证。锁持有时间风险存在，但“worker持锁＋Render thread同时等待同锁/依赖”仍要dump；正常暂停worker sleep本身不能判死锁。
+- **sync切换/调度风险（静态事实）。** [setSyncModeAndWait](<src/main/java/com/replaymod/replay/FullReplaySender.java#L367-L380>)持续等原worker alive并泵MC/ReplayMod任务；[sendPacketsTill](<src/main/java/com/replaymod/replay/FullReplaySender.java#L1507-L1549>)等sync任务完成也泵队列。异步时间戳sleep可很长；autoRead循环1337–1340只查terminal而不是普通mode/epoch停止。若卡在状态切换且autoRead不恢复，可能长等；**目前没有证据这两种方法由“继续”路径实际进入**，不擅改bundle/网络状态契约。
+- **runSync并非无限Future.get。** [SchedulerImpl](<src/main/java/com/replaymod/core/versions/scheduler/SchedulerImpl.java#L20-L28>)非MC线程提交ReplayMod自有executor后 `get(30,TimeUnit.SECONDS)`；主线程直接执行。分析要同时看Render任务泵/worker/30秒timeout日志。不能把有界等待直接描述成已证实永久死锁，或删掉同步调度“修卡死”。
+- **退出异步close不等于所有退出无阻塞。** [Handler.endReplay](<src/main/java/com/replaymod/replay/ReplayHandler.java#L278-L385>)仍同步执行closing callback、stop/terminate、`replayFile.save()`、mc.disconnect及closed callback；[TransactionalReplayFile](<src/main/java/com/replaymod/core/files/TransactionalReplayFile.java#L201-L225>)的save持adapter监视器publish真实I/O，真实stream read/close也持同adapter监视器。 [packet/file close worker](<src/main/java/com/replaymod/replay/FullReplaySender.java#L537-L622>)先等sender监视器退休reader，再锁外请求file.close并检查Managed receipt。若实际“继续”触发断连/重入退出，这些是查栈候选，**不是已证实该点击进入endReplay，更不是close worker一定阻塞Render**。不回退保源/锁引用合同来换表面不挂。
+- **非锁高CPU候选。** [Full.channelRead](<src/main/java/com/replaymod/replay/FullReplaySender.java#L677-L701>)安排chunk/light update while循环，Render若重复停在它们或其他mod渲染/native，可出现无异常的busy-loop/慢任务。新报告列出的Connectivity/ModernFix/ModernUI/Ixeris/Iris/Sodium等仅是环境，不据名字定责、不本轮禁用/升级。
+- [Full.channelRead已有catch](<src/main/java/com/replaymod/replay/FullReplaySender.java#L653-L708>)不能保证吞掉由forceMainThread排到Render task后发生的错误；新Team异常正是Render task路径。此次不扩大catch，也不把“无错误日志”当作无阻塞/无协议错的证明。
+
+### 21.6 待确认最小文件范围与 B/C/D 所有权（当前全部未批准实施）
+
+| 文件/范围 | B skeleton（获批后） | C content（获批后） | D review（获批后） |
+| --- | --- | --- | --- |
+| 新 `src/main/java/com/replaymod/replay/mixin/Mixin_IgnoreMismatchedReplayTeamRemoval.java`（候选名，尚未创建） | 核精确onTeam/INVOKE及0.3.5可见性，建最小wrap骨架；空hook不算完成 | 严格连接身份门＋不匹配仅skip一次remove，其余original一次；不catch/不修team | named/remap/user-base真实变换、实际变换后方法执行、身份/行为矩阵 |
+| [replay Mixin清单](<src/main/resources/mixins.replay.replaymod.json#L7-L14>) | client数组新增上述一项、恰一次 | 不再扩大注册 | 检查最终打包/required/mapping；不改metadata/plugin |
+| [本计划](<plan.md>) | 不由B覆盖历史 | 不由C覆盖历史 | Lead记实际结果/失败/局限；A本轮仅追加21节 |
+| [原objective Mixin](<src/main/java/com/replaymod/replay/mixin/Mixin_ReplaceDuplicateReplayObjective.java>)、[FullSender](<src/main/java/com/replaymod/replay/FullReplaySender.java>)、[Handler](<src/main/java/com/replaymod/replay/ReplayHandler.java>) | **只读保护，无骨架变更** | **只读保护，无卡死预防性修补** | 回归旧功能/静态审查；发现新小缺陷也先报，不自动写 |
+| [Scheduler](<src/main/java/com/replaymod/core/versions/scheduler/SchedulerImpl.java>)、[GUI handler](<src/main/java/com/replaymod/replay/handler/GuiHandler.java>)、[overlay](<src/main/java/com/replaymod/replay/gui/overlay/GuiReplayOverlay.java>)、[adapter](<src/main/java/com/replaymod/core/files/TransactionalReplayFile.java>)、[Managed](<src/main/java/com/replaymod/core/files/ManagedReplayFile.java>)及其他生产/资源/构建 | 全只读 | 全只读 | 卡死证据/回归读取，不升级依赖、不写仓库测试 |
+
+**建议拆成两个独立决策：** (T) 用户是否批准上述“两实现/资源文件”team-only候选及隔离验证/一次build；(H) 单人卡死先提供线程证据，再由Lead确认根因和另列最小scope。不得用T授权顺带改Full/Handler/GUI或宣布H已修。当前T/H均没有本轮新实现授权。
+
+### 21.7 后续验证矩阵和构建停点（本轮未执行）
+
+| 层级/场景 | 必须观察的结果/停点 |
+| --- | --- |
+| 原版对照 | 真实Scoreboard：目标A，成员无队或已属B时原两参remove确实抛同类错误；不以手写复制实现代测。 |
+| 正常/过期REMOVE | 当前replay：member属于A→original恰一次正常移除；无队→零调用/零状态变；已属B→零调用、B的映射和成员集合均保持；同名不同Team对象仍按身份不匹配，不用equals或name掩盖。 |
+| 混合成员/重复成员 | 同一packet含合法、不合法、重复holder：合法后续成员仍处理；第一次合法删除后重复项只skip，不能取消整包、遗漏后续动作或改写packet。 |
+| 其余team操作 | CREATE/UPDATE的display/prefix/suffix/flags/color/collision/name visibility、成员ADD跨队迁移、unknown队warn/return、整队REMOVE均原版行为；旧objective/scores/display不受新hook影响。 |
+| replay强归属负例 | 真实SocketChannel联机/单人正常连接、无ReplayHandler、旧handler/listener、关闭EmbeddedChannel、旧pipeline sender/connection、Full↔Quick及重启旧channel均必须fail-closed至original；负例不匹配仍抛原异常，不能靠helper返回false后的catch吞掉。 |
+| 主线程/真实变换 | N named82与最终remap后Mojang82及用户实例基础R各核唯一218调用、ensure先行、require/expect/allow1；**执行变换后onTeam**的off-thread调度→主线程重入/混合packet流程，不以直接调用callback/stub身份矩阵代替。完整Neo264＋全mod launch另外标未测。 |
+| 原功能回归 | 旧objective身份门/CREATE退旧状态/后继恢复；Full/Quick、EOF继续/倒退/拖动、退出一次save＋实际close/Managed release与保源失败路径；UI/optional保持指纹。不得拿旧D的分项数充本次PASS。 |
+| 实际录像（需后续允许读取样本） | 只读ZIP/纯流或独立副本审计team历史：队/成员、mode、timestamp/index、重配置/Join边界；原件hash/size/mtime前后不变，绝不对原路径构造可写Service/ZipReplayFile、不save/repair/cache清理。team-only通过不等于完整画面/颜色/sidebar保真。 |
+| 卡死分层 | 先区分“时间暂停但UI可用”与进程真实无响应；三份dump比对Render/worker锁owner/队列/调用点进展。没有dump和可复现步骤时H保持UNVERIFIED，不实施线程修补。 |
+
+- 若用户之后明确批准T实施和验证：B→C→D串行，证据应在Lead实际新建的上述新根/唯一子根，不复用旧脚本输出，不安装包/依赖，不生成仓库测试；失败原文/退出码/timeout保留，后续尝试另编号，不能删失败/重写为PASS。
+- D唯一允许的最终构建候选是 `mc_gradle(projectDir="C:/Users/zhenz/Desktop/ReForgedPlay-1.21", task="build", args=["-Djava.io.tmpdir=C:\\Temp", "--console=plain"], timeoutMs=1200000)`；**当前不执行**。不额外tasks/help/clean/refresh、不跳test、不shell wrapper。先核继承Gradle JVM为Java21，缺JDK/解析失败就停报，不升级配置或手工改环境绕过。test NO-SOURCE不当JUnit通过。
+- D需读最终non-dev产物大小/SHA、唯一client注册、remap descriptor、依赖实际可见性及保护文件指纹；真游戏回归需用户独立样本环境批准，不替换用户mod、不写原录像。跨21.1.82→264与全mod变换顺序必须作为独立风险列明。
+
+### 21.8 需要用户补充的单人卡死证据与最后停点
+
+1. **按钮和步骤：** 是Esc菜单“继续游戏”还是overlay播放三角？加载单人回放第几秒/是否到EOF、是否已拖动/Quick、是否退过回放；镜头/鼠标/菜单/音乐是否仍响应、进程CPU/内存/磁盘大致变化，等30–60秒是否恢复；提供卡死前后新命名日志、截图或短视频、所用mod JAR hash/游戏Java版本。不要求重录/覆盖唯一原件。
+2. **最重要：同一冻结进程的三次完整线程dump，相隔5–10秒，带精确PID、各次时间和时区。** 不先强退/重启Minecraft，不删cache/tmp/锁。使用同用户的已有Java21诊断工具，对已核对的**单一Minecraft PID**运行 `jcmd <PID> Thread.print -l` 三次；每次stdout＋stderr及失败退出/timeout保存为不同新文件，目录交由Lead/用户建立，非本A已保存。不要用PID0/模糊主类批量attach；不要运行GC.run、heap_dump、JFR.start或改变JVM flags。手册标注Medium影响，可短暂停顿，并非完全零扰动；若attach失败/目标无响应，保留失败原文，不安装新JDK、不反复无限attach，转交Lead决定下一种取证。
+3. dump应覆盖 `Render thread`、`replaymod-async-sender`、`replaymod-sync-sender`、`replaymod-packet-input-close`、集成Server thread、ForkJoin/resource reload/渲染相关线程；看实际stack/locked/waiting monitor地址形成等待关系。三份相同busy-loop、一次正常pause sleep、Future的30秒有界等待、真正monitor循环和native/GPU阻塞须分别定性；无Java deadlock提示不排除逻辑卡住。
+4. **准确未确认项：** 哪名holder/当前null还是另一队、team错序生成源、实际安装JAR是否等于本机产物、完整264全mod WrapOperation启动/变换可用性、新兼容行为与画面保真、卡死按钮及真实阻塞栈，全部仍待补证。未声称旧问题全解决或此次卡死已定位。
+5. **本轮终点：仅21节落盘，T为候选、H为取证请求；无新实现/构建/测试/游戏attach/录像写入。** Lead收到A结果后先核对本计划和工具原文，再问用户是否批准T以及如何提供H证据；不自动启动B。
+
+### 21.9 Lead与只读packet-audit补充：真实新日志和单人错流证据，更新待批准范围
+
+**本节在A结束且Lead回读21.1–21.8后追加；前述“无本轮日志/单人样本”“实际安装hash未核”“H仅等dump、Full必须只读”仅描述A当时的证据边界，现由本节明确更新。仍没有新实施授权，不启动B/C/D、不改生产/资源。** Lead本轮已实际加载minecraft-java-build与minecraft-neoforge-mod；A角色不加载技能的限制没有被伪称满足。
+
+#### 21.9.1 独立真实输入，不误用旧日志
+
+- 工作区 [latest.log](<latest.log>) 仍为11/17旧日志，273734B、SHA256 `e3bb8a418f3c8c4004c32afaec92bb3efeab40ece560b06c21bfde80fd226428`；工作区logs/latest.log亦旧测试输出，两者均不是此次卡死记录。新disconnect报告仍21.2的20:40:10团队异常。
+- Lead以Windows原生Get-Item确认游戏logs是SymbolicLink指向 `R:/logs`，在工具不遍历链接的拒绝之后定位**确切目标**读取，未改ACL/链接。实际 [本次日志](<R:/logs/latest.log>) 为14,412,098B、71,288行、GB18030，SHA256 `9bae09c9239575f432dbb56b504b273bb63f80b01f00cd67824ca537c2c3b8bd`，末时间20:42:16，原件读前后mtime/大小稳定。独立 [解码副本](<C:/Temp/reforgedplay-team-hang-lead-20261118-204010/log-0-decoded-utf8.txt>) 严格转码无替代，原件未改；[原件收据](<C:/Temp/reforgedplay-team-hang-lead-20261118-204010/log-receipts.json>)、[Lead事实/工装问题](<C:/Temp/reforgedplay-team-hang-lead-20261118-204010/LEAD-FINDINGS.md>)均保留。
+- 本机当时只有Gradle PID19172、没有Minecraft进程；没有attach或获得卡死时dump。用户 [实际安装包](<D:/Jerry's/MCJE/.minecraft/versions/1.21.1-NeoForge_21.1.264/mods/reforgedplaymod-1.21.1-0.3.1.jar>) 与 [交付包](<build/libs/reforgedplaymod-1.21.1-0.3.1.jar>) 重算hash均为 `3328e9958090a2d51c565eaea674cb19512af90c761a2f7d889a9aa2b843c42a`，排除“用户没换到该包”这一项，不排除全mod兼容问题。
+- 两个新样本只读ZIP/包字节，不在原路径实例化可写ReplayFile：服务器 [20_39_23](<D:/Jerry's/MCJE/.minecraft/versions/1.21.1-NeoForge_21.1.264/replay_recordings/2026_11_18_20_39_23.mcpr>)；单人 [20_41_26](<D:/Jerry's/MCJE/.minecraft/versions/1.21.1-NeoForge_21.1.264/replay_recordings/2026_11_18_20_41_26.mcpr>)。后者singleplayer=true、duration6309ms、protocol767、ZIP160814B、packet流1,583,791B、SHA256 `206476db1ca5dd4c1c7b9d75013d726dcdc3283ecc7ec04f08b127c804bbf114`。[session-summary](<C:/Temp/reforgedplay-team-hang-lead-20261118-204010/session-summary.json>)记录两者原件hash/size/mtime及元数据。ZIP metadata为GB18030，本轮只按实际编码读取，未改变编码或生产JSON实现。
+
+#### 21.9.2 已确证的错流特征与尚未确证的整个卡死因果
+
+- 新日志1419行20:41:45.630打开上述单人样本；1504–1508行20:41:54.956真实堆栈显示 `GuiReplayOverlay$7.run -> ReplayHandler.doJump:913 -> FullReplaySender.sendPacketsTill:1535 -> executeTaskQueue`，证明至少有一次时间线跳转。该处voicechat的EmbeddedSocketAddress异常不等于此次错流首错，也不据此给voicechat定责。
+- **首个解码错误**在1538行20:41:58.670：PLAY add_entity多726B；1557行ticking_step多877B；1595行sound_entity枚举115/10越界。之后把NUL分隔quickskin/voicechat通道注册串当成ResourceLocation。至20:42:16.235共**1667条顶层DecoderException**，extra最大1,155,910B。不能仅以“无独立crash报告”推断无日志错误。
+- 只读packet-audit在新 [证据脚本根](<C:/Temp/reforgedplay-team-hang-packet-audit-20261118>) 核对原帧和实际MC基础Jar构造器/PLAY ID：单人4365帧、末6309ms，边界完整、无时间倒退；服务器99610帧、末20320ms，边界完整。**这仅是帧层完整，不是所有payload语义正确或可播证明。** 单人#0是LOGIN success28B；#1 offset36是CONFIG `minecraft:unregister`779B；#2 offset823 CONFIG `minecraft:register`153B。
+- 把这三个开头包错投PLAY decoder：#0的id02恰被add_experience_orb读28B，暂不报错；#1 id01被add_entity恰读53B，所以779−53=**726**；余量首ASCII r=0x72，追加下一153B后当ticking_step读2B，726+153−2=**877**；其后ASCII g=0x67被当sound_entity，i=105与s=115精确解释enum115/10。**前三错和原始LOGIN/CONFIG流误交PLAY逐字节吻合，已不只是泛泛怀疑死锁/内存/本地编码损坏。** [first_fault.py](<C:/Temp/reforgedplay-team-hang-packet-audit-20261118/first_fault.py>) 和 [bytecode.py](<C:/Temp/reforgedplay-team-hang-packet-audit-20261118/bytecode.py>)是该层证据，不冒称已运行变换后264游戏。
+- 生产源码存在具体可达缺陷链：[同步EOF](<src/main/java/com/replaymod/replay/FullReplaySender.java#L1626-L1637>)关闭真实reader后 `replayIn=null`，没有记录已耗尽/需要协议重启，保留target timestamp；[doJump结束](<src/main/java/com/replaymod/replay/ReplayHandler.java#L911-L917>)启用async；[异步入口](<src/main/java/com/replaymod/replay/FullReplaySender.java#L1271-L1279>)见null就从LOGIN读取文件开头，**没有先重建仍在PLAY态的通道**。原async自然EOF1361+本来有pause→等待→restart边界，但同步EOF转async没接入该合同。
+- Lead已回读packet-audit最终 [证据报告脚本](<C:/Temp/reforgedplay-team-hang-packet-audit-20261118/evidence_report.py>) 和first_fault脚本。队员重算两原件size/mtime/hash与Lead基准一致（服务器SHA256 `45868993536906e999afd48766c05ff1d24b8fccd3d4e1edfe264a261fd5f688`）。另一个同类可达入口是async EOF已close/null、暂停等待中被mode/epoch切断，尚未走正常restart就进入后继worker；H须一并覆盖这种EOF交接，不能只补同步catch。队员建议首fatal decode隔离防止累积是独立防御建议，**本候选未授权改ReplayHandler通用exceptionCaught/所有异常策略**；不能趁本轮顺手扩大吞错/断连行为。
+- 目前没有运行时EOF状态探针和卡死dump，因此**“本次入口必定就是sync EOF”与“全部UI无响应唯一由此造成”仍未最终签证**。字节级错流与源码可达缺陷已经足以提出定向H修复；不必等用户重新撞卡死才承认此缺陷。不以异常风暴代替真实锁关系证据；若修后仍真无响应，再抓同一进程间隔dump。
+
+#### 21.9.3 更新后的最小候选范围：T＋H一起确认，批准后连续B→C→D
+
+1. **T团队兼容维持21.4原方案**：新replay-only成员REMOVE局部wrap与client注册；只忽略不匹配成员的这一次remove，正确成员及同包其它动作继续，真实服务器/单人非回放连接仍原版。未知holder当前在哪队及团队包生成源仍待审计，不以原流帧完整冒称已知生成原因。
+2. **H新增允许候选仅为 [FullReplaySender.java](<src/main/java/com/replaymod/replay/FullReplaySender.java>) 的EOF→模式/异步接续状态与协议边界修复（含同步EOF和异步EOF暂停被切换）。** 分清“尚未打开”与“已经耗尽”：实际耗尽流仍必须真实关闭；同步EOF后的async不可在旧PLAY通道直接重读LOGIN。保留末帧/暂停与一次恢复播放的原产品语义；需要从头时必须先完整重启连接LOGIN→CONFIG→PLAY，然后才从头送包。具体状态表示由B/C按实际代码制定，不强塞简单 `replayIn != null` 判断或在切async时无条件重启。
+3. 必须保留：普通未耗尽mode/epoch交接合法prefetch、时间戳/快进/倒退、Quick Full互转、异步自然EOF暂停再继续、terminal/代际/lease与真实close/release/保源合同。不得回退“关实际reader”以避免EOF，不持旧closed流假装仍可读，不重新标记旧字节成新代际，不在暂停或末尾无限重开/自动循环；不吞DecoderException、强行把CONFIG包当PLAY跳过，或以只停止刷日志冒充恢复正确播放。
+4. **本候选总实现/资源scope：** 新team Mixin、现有replay Mixin清单、FullReplaySender，共三项，另本计划记录。ReplayHandler、GUI、Scheduler、录制编码、adapter/Service/Workspace、旧objective Mixin、UI/语言/optional、依赖/构建/配置/仓库测试/原录像全部只读保护。若证据表明必须改scope外才能正确修复，先报精确原因，不顺手扩围。新文件尚未创建；本轮没有改这三项。
+5. 原21.7 T验证矩阵保留；H额外验证**真实生产方法与真实Netty解码管线组合**：同步读至/越过EOF再async，暂停末帧不重开，恢复一次只产生一次完整协议重启；正好末尾、短单人样本、拖到末尾/越过、反复拖回开头/中间、自然async EOF、正常未耗尽prefetch交接、Full/Quick、终止竞态与释放均要覆盖。精确检查发包状态与payload读尽，不能只用stub decoder或flag计数签通过。原两份新样本只读/隔离副本重放对照，并前后hash/size/mtime保护。
+6. 改前冻结本轮源/资源/原件指纹并取真实本轮前像diff；B/C按片回报真实差异，D在现有固定依赖上mc_gradle执行21.7指定build参数，保留失败/timeout；禁止包安装、Git写、改仓库测试或原录像/缓存。最终交付仍区分真实管线隔离层、264全mod游戏层与用户实际卡死验收，不再把旧D测试数当本轮通过。
+7. **向用户仅确认两点：** 是否批准T＋H上述三项实现/资源的定向修复与隔离验证/构建；“继续播放”具体是左上角播放三角、ESC返回游戏还是路径播放，之前是否拖到录像末尾。日志已证实至少一次时间轴跳转，不再让用户重复提供已找到的日志/录像或hash；游戏已结束，不要求现在给不存在的卡死dump。
+
+本节结论：两个新问题都有定向方案；团队REMOVE直接异常已确认，单人从头LOGIN/CONFIG错投PLAY的字节特征与可达EOF接续缺陷已定位，**不冒称整个卡死最终唯一根因/已经修复**。当前只读诊断＋计划落盘，待用户确认；无新构建或新的可安装修复包。
+
+### 21.10 用户批准、实施冻结与阶段契约
+
+- 用户对上一回复“确认按此方案修吗”回答“嗯”，现按**21.9.3的三项实现/资源范围**执行T＋H，逐阶段B→C→D连续推进，无需再逐小步批准；不扩围至通用异常隔离/ReplayHandler/GUI/配置/依赖/测试。用户尚未回答按钮类别/完整步骤，不代猜；证据边界和真实全游戏卡死仍未完全签证。
+- Lead本轮重新加载两技能并回读构建/属性/wrapper/libs与21.9；固定MC1.21.1、Neo21.1.82（用户264）、Java21、Loom1.7、Gradle8.8，不scaffold既有项目，不升级。获批后新证据总根为 [本轮实施证据](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92>)；[baseline.json](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/baseline.json>)冻结567源码/资源/构建/libs及报告项、两份新录像与实际安装旧包的hash/size/mtime。before子树有当前两既有实现文件及计划前像，新Mixin确认不存在。不是累计HEAD diff；不覆盖前轮证据。
+- **唯一实施白名单：** 新 `src/main/java/com/replaymod/replay/mixin/Mixin_IgnoreMismatchedReplayTeamRemoval.java`、既有 [replay Mixin清单](<src/main/resources/mixins.replay.replaymod.json>)、[FullReplaySender.java](<src/main/java/com/replaymod/replay/FullReplaySender.java>)；另本计划仅追加。其余源/资源/配置/构建/依赖/仓库测试/.env/真实游戏/录像/锁/cache/.whale-craft全部只读保护，无Git写/装包/自动安装。
+- **B现在只做骨架：** 读取21.4、21.7、21.9及本节，核精确API并建team wrap骨架＋恰一次client注册；骨架先调用original（不得把空hook当功能完成），FullSender此阶段只读，EOF状态实现留C。不得创建/更改仓库测试；测试夹具/收据仅在本轮新B子根（若角色禁止外部文件则如实把原工具摘要追加计划，不能谎报路径）。B不构建，不启动C。
+- **C分两片串行，Lead每片回读后再下片：** C1仅把team骨架补齐严格replay归属门/单次不匹配REMOVE语义，FullSender保持；C2仅FullSender EOF明确耗尽状态/统一协议重启边界，覆盖sync EOF与async EOF暂停中断，保留非EOF预读和close/release门。每片先读引用/API实际Jar，真实diff＋允许的新根外部验证收据，不能修改仓库测试；不跑Gradle，不碰前片冻结源，不自行启动下一片。
+- **D接最终组合：** 回读C结果与21.7/21.9矩阵，按指定一次mc_gradle build任务/参数/timeout执行，允许三白名单内明确小修（改后实际重新验证；必须重构建时说明原因，不无谓重复build）。构建不得shell wrapper或升级依赖。隔离新夹具执行完整生产方法＋真实Netty/MC字节码变换与状态验证，声明所有MC/GUI/应用边界，不能把手写decoder/stub flags替代要求的真实协议层。当前真实用户游戏不启动、不安装。
+- 正常pause/EOF保持末帧，继续一次才做一次完整LOGIN→CONFIG→PLAY重启；无条件模式切换重启、旧PLAY通道重开LOGIN、把旧prefetch重标新代际、放弃真实reader close或fake-release均禁止。T只跳过当前回放连接不匹配成员的一次remove，其他操作照常；live负例走original并保留异常。
+- 验证失败/超时保留原文，修工装另编号，不篡改旧收据；原件只读ZIP/纯流或隔离副本，不在原路径构造可写ReplayFile，不清cache/tmp/锁或恢复材料。Lead最终检查567保护项中白名单外hash、新增文件列表和三输入hash/mtime，并交当前新JAR、真实三文件diff及独立报告。实际264全mod启动、完整视觉保真、无线程dump的全部卡死因果及旧跨进程隐藏现象仍不冒充已验收。
+
+### 21.11 B骨架交付：透传WrapOperation与一次client注册，尚无功能实现
+
+- 本B先读21.4/21.7/21.9/21.10、[实施基线](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/baseline.json>)及before前像，再回读构建/属性/wrapper/Neo元数据，确认既有MC1.21.1、Neo21.1.82、Java21、Architectury Loom1.7-SNAPSHOT、Gradle8.8、Yarn1.21+build.1；没有scaffold/迁移/升级。**上级B角色明禁读取skills，故B未加载技能文件**；Lead已加载两匹配技能的事实见21.10，不冒充本B完成。
+- 精确API重新核对仅用已有 `C:/Program Files/Java/jdk-21.0.12.1/bin/javap.exe --system C:/Program Files/Java/jdk-21.0.12.1`；version及四类读取共5命令均exit0、无timeout。N仍21.3的named82本地Jar，本轮SHA256=`010b31beb568e6d3e2c558ac2940fbffe82689080279b1d00731e2ca1dd32c8f`、22686461B；E仍既有MixinExtras0.3.5，本轮SHA256=`c47a887a872884749efc7df8853931632eabd1635653565b15b8be10c810ffc9`、174799B。onTeam精确descriptor、offset6 forceMainThread、offset218唯一两参remove、Scoreboard两参remove/getScoreHolderTeam以及WrapOperation的method/at/remap/require/expect/allow、Operation.call(Object...)均实际读取确认；不新增依赖。完整输入路径/argv/退出码见[API收据](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/B-skeleton-01/api-commands.json>)，对应5组stdout/stderr和[onTeam摘录](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/B-skeleton-01/onTeam.excerpt.txt>)实际保存在该B新子根。
+- 仓库实际修改仅两项：新增33行[team骨架](<src/main/java/com/replaymod/replay/mixin/Mixin_IgnoreMismatchedReplayTeamRemoval.java>)，绑定精确onTeam/INVOKE、显式remap=true、require/expect/allow均1；方法内只有TODO注释与无条件 `original.call(scoreboard, member, targetTeam)`，原receiver/参数恰一次透传，无gate/skip/catch/feature逻辑。既有[client清单](<src/main/resources/mixins.replay.replaymod.json#L14>)只插入一行新Mixin注册，恰一次，无plugin/metadata/其他字段改动。**这不是团队错误已修复；C1仍须实现身份门和窄skip。**
+- 改前重新hash核对567个基线条目全相等，新Mixin不存在；改后567条目仅清单发生预期变化，其余566项全相等，src/libs/gradle新增仅该Mixin。[FullReplaySender](<src/main/java/com/replaymod/replay/FullReplaySender.java>)和旧objective/Handler/构建/依赖等未变，EOF实现留C2。新Mixin SHA256=`d562ed72b48fabc0b0502fda3835d3f1c47d9d3214c1d34348387c43b6bc7878`、1442B；清单SHA256=`84e883209157ba4e020379da23194401a6a4ab2a1faf884cf03f44af3346208d`、1731B。[本轮真实B差异](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/B-skeleton-01/actual-B.diff>)相对实施冻结前像而非累计Git HEAD；[静态检查收据](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/B-skeleton-01/static-receipt.json>)和两个检查脚本均为本轮新B证据，不覆盖旧根。
+- 上级骨架角色要求至少一个test stub，因此仅在获准外部B新根创建[常量assert stub](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/B-skeleton-01/SkeletonTestStub.java>)，无依赖、未编译/未运行、不是生产行为验证；**未创建或更改任何仓库测试**。未执行Gradle/build/javac/游戏/安装/Git写/attach，未打开真实录像、实际安装包、游戏cache/锁/.whale-craft。静态源码检查不等于编译成功、MixinExtras初始化/变换成功、remap产物正确或Neo264全mod运行通过；这些留D。没有新可安装包，不能将历史测试数用于本轮。
+- 本B结束并等待Lead回读，不启动C。计划绝对路径：[C:/Users/zhenz/Desktop/ReForgedPlay-1.21/plan.md](<C:/Users/zhenz/Desktop/ReForgedPlay-1.21/plan.md>)；本节仅追加，前文历史不覆写。
+
+### 21.12 C1交付：严格当前replay身份门与mismatch-only成员移除skip，EOF留C2
+
+- 本C1先读21.4/21.7/21.9/21.10/21.11、B骨架/清单/外部stub/实际API收据及旧objective身份门、Accessor、ReplayHandler当前Full/Quick选择与pipeline源；先核既有Loom1.7-SNAPSHOT、Java21、MC1.21.1/Neo21.1.82与neoforge.mods.toml，未迁移/升级/scaffold。上级C角色不允许构建及网络访问，故本片仅源码实现、只读javap与外部静态检查，**没有编译、行为运行或真游戏验收**，不以静态检查冒充21.7矩阵PASS。
+- 在独立新[C1证据子根](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/C1-team-01>)保存本片前像与实测收据。使用既有JDK21.0.12.1重新执行6条javap，全部exit0、无timeout；读取本机named82、MixinExtras0.3.5与既有Netty4.1.97.Final，非仅引用B结论。核onTeam精确descriptor、offset6 forceMainThread、offset218唯一两参remove及其REMOVE循环位置；Scoreboard实际getScoreHolderTeam与if_acmpeq身份分支/原IllegalStateException；MC当前handler/getConnection/getPacketListener/isOnThread（含继承）和Netty channel/pipeline签名；WrapOperation与Operation.call签名。named与Extras的hash/size均与B相等。完整argv、退出码、输入hash见[API收据](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/C1-team-01/api-commands.json>)；[API断言](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/C1-team-01/api-checks.json>)及6组stdout/stderr均为本片新读取，不覆盖B输出。
+- 唯一生产变更是[新team Mixin](<src/main/java/com/replaymod/replay/mixin/Mixin_IgnoreMismatchedReplayTeamRemoval.java#L37-L78>)：保留B注解/descriptor/remap/require=expect=allow=1与callback签名，复制窄@Unique helper，其源码与只读旧objective门完全一致：MC主线程、当前MC handler===this、connection listener===this、Accessor channel为open/active EmbeddedChannel、当前ReplayHandler及sender非null，pipeline的packet_handler===connection且ReplayHandler.PACKET_HANDLER_NAME===当前Full或Quick sender。没有只凭有ReplayHandler或EmbeddedChannel就放行。
+- 仅在该门通过且**实际receiver** `scoreboard.getScoreHolderTeam(member) != targetTeam` 时直接return这一次wrapper，不改映射/成员表/当前另一队，不按队名或equals比较、不改String、不cancel包、不catch异常。其余路径唯一的 `original.call(scoreboard, member, targetTeam)` 保持原receiver/参数恰一次；由原onTeam循环继续后续成员/动作。此为代码审查结论，尚非实际变换后方法执行证据。用户提供的raw纯流参考“index2501/t0 Qantas1迁往9998_d26e；index5867/t820ms旧队9599_8b96再REMOVE”只作为外部模拟线索，**本C1未重新读录像/重跑模拟，不给MC运行签证**。
+- [真实C1差异](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/C1-team-01/actual-C1.diff>)相对本片读入的33行B骨架，不是累计HEAD diff；[静态收据](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/C1-team-01/static-receipt.json>)确认567个已冻结条目在C1前后全相等（包括B清单、FullReplaySender、旧objective、Handler、构建/依赖/已有测试），src/libs/gradle路径集合未增删。相对21.10原始基线仍仅B清单这一既有变更，另新Mixin由B骨架补至79行、3284B，SHA256=`335870c8d5f05d379c8c1ef52a3089a4606e06f19aa7897af8e9952cff3eb47d`。计划仅追加本节；片前像、片后像、两个Python脚本与原始工具输出均在新C1子根。
+- 本片未读写真实录像、实际安装包、游戏cache/锁/.whale-craft；两录像/安装包的本片未变独立重算留Lead，不冒充本C1已核其当前hash/mtime。未运行Gradle/javac/测试构建工具/游戏/attach/安装/Git写，未改仓库测试。外部Python只执行字节指纹、精确源码/注解/helper比较及只读javap，**未用手写Scoreboard/decoder或stub门模拟冒充行为验证**。
+- 待D按21.7/21.9分层实测：真实Scoreboard原版异常对照；当前replay合法/无队/另一队/同名异对象、混合/重复成员；live/off-thread/旧handler/listener/sender/关闭channel及Full↔Quick负例；真实变换后onTeam主线程重入与其余team操作；remap产物/Extras实际初始化可见性与唯一完整build。Neo264全mod启动、视觉保真和完整卡死因果仍未验收。**C1到此结束，等待Lead回读；不启动C2/D，不改FullReplaySender，EOF修复留下一片。**
+
+### 21.13 Lead回读C1、真实team包与EOF反例，串行C2入口
+
+- Lead已回读79行实源、75行C1-only差异、21.12与API摘要；独立 [C1后保护检查](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/lead-check-C1/receipt.json>)确认当前源/资源相对初始只变清单＋新Mixin，565白名单外保护项均相等，两录像和实际安装旧包hash/size/mtime全不变。新Mixin固定335870c8d5f05d379c8c1ef52a3089a4606e06f19aa7897af8e9952cff3eb47d；清单固定84e883209157ba4e020379da23194401a6a4ab2a1faf884cf03f44af3346208d，C2不得写它们。尚无C1编译或行为PASS，不把静态收据当实现已验收。
+- 只读队员新 [team原帧报告](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/readonly-team-packets/REPORT.md>)、[事件全量](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/readonly-team-packets/team-events.json>)与[审计](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/readonly-team-packets/team-audit.json>)已由Lead回读。服务器177个team包仅一次member归属不匹配：2501/t0 Qantas1由ADD自动迁到9998_d26e，5867/t820旧队9599_8b96又REMOVE，确为另一队而非无队。之后62343/t10251对vqlxfy的合法REMOVE仍须正常执行。全部18个原REMOVE均单成员，**不能用原件证明同包先invalid后valid继续；D须显式合成混合/重复名单，用真实变换后路径验证**。无中途Join/respawn/reconfig边界；错误生成源仍未知，纯流模拟不是MC运行。
+- Lead回读只读 [EOF十条审查](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/readonly-eof-review/READONLY-NOTES.md>)；提炼的 [C2/D约束](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/LEAD-C2-CONSTRAINTS.md>)现已冻结，C2/D均先读。这是21.9 EOF范围内的具体化：不额外授权通用decoder异常策略，不改Handler/Scheduler/GUI，不要求先再问用户已批准的EOF内部细节。
+- 特别增加D确定性反例：原hurry完成需lastTimeStamp>desired，但EOF等待只在desired==-1时执行；目标恰等于/越过末包可保留desired后绕过等待、自动重放。修复必须消费**当次**forward EOF意图并保持末帧，不覆盖并发backward；不能简单EOF→restartPending导致同步same-time自动重启。暂停/普通mode/EOFclose本身不得提前advanceGeneration或使用terminal一次性close worker。
+- 新EOF pause应区分初次确认与已有暂停/恢复意图；晚到pause不可吞一次resume。Handler的async=true后才setSpeed(0)，两句间旧正速不算新恢复；setReplaySpeed正速现在不增controlEpoch，不能仅靠旧control guard。runSync超时不cancel任务，新EOF pause/restart需有失败/超时后晚到票据防护；所有client回调不得新取sender长锁或在modeLock内wait。具体紧凑实现由C2定，不要求顺手重构旧非EOF路径。
+- 此时才启动C2：**仅FullReplaySender的EOF状态/接续修复**与计划追加，外部证据在本轮新C2子根；先核源码/API、做真实片前像diff、保留失败原文和签名审计。若角色不允许编译/运行行为，明确留D，不伪称做过。C2结束先由Lead回读再启动D；D要求仍为21.7/21.9/21.10以及本节，不拿旧D/静态检查作通过。构建/依赖/配置/仓库测试/原件与全部表外源码保护继续有效。
+
+### 21.14 C2续派交付：EOF保持末帧，明确恢复后先重建协议
+
+- 续派重新核对片前 `FullReplaySender` 字节等于Lead冻结前像；C1 Mixin/清单保持21.13指纹。仅改 [FullReplaySender](<src/main/java/com/replaymod/replay/FullReplaySender.java>) 和追加本节；[真实C2片差异](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/C2-resumed/actual-C2.diff>)、[计划追加差异](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/C2-resumed/plan-append.diff>)、[范围/前后指纹](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/C2-resumed/receipt.json>)均与本次续派前像比较，不是Git累计差异。
+- 两种发送方式均先记EOF，再真实关闭当代reader；关闭失败保留引用和待关闭状态，等同步查询、显式重启或终止走原真实close，不再读该流。EOF历史保留关闭前代际，等时/更晚同步查询保持末帧和请求时间；实际倒退、失败或Full/Quick/连接代际失效仍走必要边界。非EOF合法reader和prefetch不因普通模式切换被重标、丢弃或重开。
+- 初次EOF暂停与显式恢复分开：未执行的pause也在异步UI上呈现可播放；新正速在短锁下替换EOF暂停意图，已有暂停跨worker沿用，切至异步时残留的正速不算恢复。EOF消费未达目标的forward hurry（含恰末包/越末包），不清掉新backward请求。重启复用Handler原重建；只有确认新活动Full通道和最终代际才清EOF、允许从LOGIN开流。EOF pause/restart的runSync票据在返回、失败或中断后作废；client回调不获取sender长锁，Handler重建不在modeLock内。EOF本身不推进资源包代际、不走terminal关闭完成位。
+- D优先用生产方法＋真实Netty/MC：① sync到实际末包/越末尾、同/更晚目标重复采样、true→0停点、Play仅一次，断言原通道零LOGIN，新通道LOGIN→CONFIG→PLAY真实payload读尽；② 自然EOF在首次pause前、已pause后及mode/epoch替换时用barrier测一次resume；保留超时回调排队，在失效、supersede、terminal后放行检查零旧副作用；③ hurry恰末/越末、EOF后forward重复及并发backward/等时拖动，检查末帧、目标和唯一回放；④ LIVE预读交接及EOF Full→Quick→Full的0/中间/末尾；⑤ 注入EOF close异常、恢复后新reader以及终止竞态，计真实close、Managed release、未推进旧回调代际、无终止后发包/重启。团队矩阵及唯一完整构建仍按21.7/21.9/21.10。
+- C2仅源码和范围核对，未编译、未运行测试/真实协议管线/游戏，不读写原录像或实际安装包/cache/恢复目录，不改依赖/配置/仓库测试/Git/whale；未复现完整卡死因果，也未验收Neo264全mod。结束等Lead回读，不启动D。
+
+### 21.15 D交付核验：构建、新Jar、真实隔离矩阵及未验收项
+
+- 共享 [D报告](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/D-resumed/REPORT.md>)、[证据索引](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/D-resumed/EVIDENCE-INDEX.md>)、[实际三目标差异](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/D-resumed/C2-readback-actual-current-round-source.patch>)。D未改生产、仓库测试、配置、依赖、Git状态或实际游戏；计划在已有空分隔行后仅追加。固定MC1.21.1、Neo21.1.82、Java21.0.12.1、Loom1.7.435、Gradle8.8。唯一指定 `mc_gradle build` 为 `BUILD SUCCESSFUL in 50s`，`test NO-SOURCE`；[实际工具输出](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/D-resumed/mc_gradle-build-tool-original.txt>) 保留既有目标以外的WorldRenderer/JOML remap诊断，区别成功任务和警告/错误行。未执行额外任务或shell wrapper。
+- 新 [交付Jar](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/D-resumed/reforgedplaymod-1.21.1-0.3.1.jar>) 17631511B / SHA256 `7d4ca53931ee90d15829b9d193c6b85e4d589d805bacc6c92c95f3caa697b644`，全ZIP CRC、唯一client注册；真实Sponge＋Extras变换通过named82、最终remap82及用户264原版基，检查ensure先行、唯一wrapper及原调用bridge，82 Extras0.3.5/264实际内置0.5.5。264原版基执行真实变换后 `onTeam`，异线程→主线程、混合/重复/同名异对象、原版CRUD/迁移，以及活跃本地TCP NioSocketChannel等负例保留原异常。未冒称完整联机/单人游戏启动或全mod应用顺序。
+- 原录像只读ZIP。服务器177个team帧以真实PLAY decoder加实际变换后onTeam处理：#5867保持Qantas1在另一队；#62343合法删除；18个显式成员REMOVE调用原实现17次。单人4个原始帧在正确LOGIN/CONFIG下实际解码，#1误投PLAY的对照复现add_entity DecoderException；不代表整段PLAY或原卡死已重现。原件与旧安装包 [保护收据](<C:/Temp/reforgedplay-team-eof-impl-20261118-fe92/D-resumed/final-protection.json>) 核hash/size/mtime。
+- 最终Jar生产FullSender＋真实Netty及264基PacketDecoder的12条隔离用例通过：exact/overshoot、同/晚目标、末帧只在显式恢复后重建一次、旧PLAY零新增LOGIN、正常预读、forward hurry exact/overshoot、backward、EOF真实close失败重试/terminal、迟到pause/终止回调、未发布启动/重复失败后重试、回执前后换mode，以及真实Handler Full↔Quick管线回Full并从0到中间。工装明示边界：客户端/调度、Handler disconnect/setup、针对阶段包切入下一真实decoder，Quick索引和ReplayFile外壳；真实输入流、解码与FullSender非stub。迟到测试是注入短超时，不声称在真Scheduler计时30秒。失败和超时原始日志另留，不充作通过。
+- **未启动真机/未安装。** 未验收完整Neo264全mod、真实Quick索引与Managed release/恢复持久层、完整录像/视觉与旧objective全矩阵、真实线程dump和卡死最终因果。新包可交用户另行复验，不是全游戏通过签证。

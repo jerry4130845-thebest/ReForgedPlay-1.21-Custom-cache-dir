@@ -3,6 +3,7 @@ package com.replaymod.core.gui;
 import com.replaymod.core.SettingsRegistry;
 import de.johni0702.minecraft.gui.container.AbstractGuiScreen;
 import de.johni0702.minecraft.gui.container.GuiPanel;
+import de.johni0702.minecraft.gui.container.GuiScrollable;
 import de.johni0702.minecraft.gui.element.GuiButton;
 import de.johni0702.minecraft.gui.element.GuiElement;
 import de.johni0702.minecraft.gui.element.GuiLabel;
@@ -28,7 +29,7 @@ public class GuiReplaySettings extends AbstractGuiScreen<GuiReplaySettings> {
             }
         });
 
-        final GuiPanel allElements = new GuiPanel(this).setLayout(new HorizontalLayout().setSpacing(10));
+        final GuiScrollable allElements = new GuiScrollable(this).setLayout(new HorizontalLayout().setSpacing(10));
         GuiPanel leftColumn = new GuiPanel().setLayout(new VerticalLayout().setSpacing(4));
         GuiPanel rightColumn = new GuiPanel().setLayout(new VerticalLayout().setSpacing(4));
         allElements.addElements(new VerticalLayout.Data(0), leftColumn, rightColumn);
@@ -98,10 +99,16 @@ public class GuiReplaySettings extends AbstractGuiScreen<GuiReplaySettings> {
             }
         }
 
+        // Storage strings deliberately stay outside the Boolean/enum settings loop.
+        final GuiButton storageButton = new GuiButton(this).setI18nLabel("replaymod.gui.storage.title")
+                .setSize(200, 20).onClick(() -> new GuiStorageSettings(toMinecraft(), settingsRegistry).display());
+
         setLayout(new CustomLayout<GuiReplaySettings>() {
             @Override
             protected void layout(GuiReplaySettings container, int width, int height) {
-                pos(allElements, width / 2 - 155, height / 6);
+                // Keep the two fixed navigation buttons outside the clipped settings list.
+                set(allElements, width / 2 - 155, 30, 310, Math.max(1, height - 90));
+                pos(storageButton, width / 2 - 100, height - 52);
                 pos(doneButton, width / 2 - 100, height - 27);
             }
         });

@@ -50,6 +50,40 @@ public class SettingsRegistry {
         SettingsChangedCallback.EVENT.invoker().onSettingsChanged(this, key);
     }
 
+    /** One consistent map snapshot, including all storage keys. */
+    public Map<SettingKey<?>, Object> snapshot() {
+        synchronized (settings) {
+            return Collections.unmodifiableMap(new LinkedHashMap<>(settings));
+        }
+    }
+
+    /** Validate the entire draft, commit once under the map lock, then notify observers. */
+    public void setAll(Map<? extends SettingKey<?>, ?> values) {
+        Map<SettingKey<?>, Object> draft = new LinkedHashMap<>();
+        draft.putAll(values);
+        synchronized (settings) {
+            for (Map.Entry<SettingKey<?>, Object> entry : draft.entrySet()) {
+                SettingKey<?> key = entry.getKey();
+                Object value = entry.getValue();
+                if (!settings.containsKey(key)) throw new IllegalArgumentException("Unknown setting: " + key);
+                Object defaultValue = key.getDefault();
+                Class<?> type = defaultValue instanceof Enum<?> e ? e.getDeclaringClass() : defaultValue.getClass();
+                if (value == null || !type.isInstance(value)) throw new IllegalArgumentException("Invalid value for " + key.getKey());
+                if (key instanceof MultipleChoiceSettingKey<?> choice && !choice.getChoices().contains(value)) {
+                    throw new IllegalArgumentException("Invalid choice for " + key.getKey());
+                }
+            }
+            for (Map.Entry<SettingKey<?>, Object> entry : draft.entrySet()) updateBatchBackend(entry.getKey(), entry.getValue());
+            settings.putAll(draft);
+        }
+        for (SettingKey<?> key : draft.keySet()) SettingsChangedCallback.EVENT.invoker().onSettingsChanged(this, key);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private void updateBatchBackend(SettingKey<?> key, Object value) {
+        backend.update((SettingKey) key, value);
+    }
+
     public void save() {
         backend.save();
     }

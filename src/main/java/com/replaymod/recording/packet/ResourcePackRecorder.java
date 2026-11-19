@@ -80,51 +80,101 @@ public class ResourcePackRecorder {
         this.replayFile = replayFile;
     }
 
-    public void recordResourcePack(Path file, int requestId) {
+    private boolean sealed;
+    private Throwable firstFailure;
+
+    /** Same monitor covers admission, reading, hash, blob close and last index publication. */
+    public synchronized void recordResourcePack(Path file, int requestId) {
+        if (sealed) return; // reject BEFORE touching an old download's path/volume
         try {
-            // Read in resource pack file
             byte[] bytes = Files.readAllBytes(file);
-            // Check whether it is already known
             String hash = Hashing.sha1().hashBytes(bytes).toString();
-            boolean doWrite = false; // Whether we are the first and have to write it
-            synchronized (replayFile) { // Need to read, modify and write the resource pack index atomically
-                Map<Integer, String> index = replayFile.getResourcePackIndex();
-                if (index == null) {
-                    index = new HashMap<>();
-                }
+            synchronized (replayFile) {
+                Map<Integer, String> existing = replayFile.getResourcePackIndex();
+                Map<Integer, String> index = existing == null ? new HashMap<>() : new HashMap<>(existing);
                 if (!index.containsValue(hash)) {
-                    // Hash is unknown, we have to write the resource pack ourselves
-                    doWrite = true;
+                    try (OutputStream out = replayFile.writeResourcePack(hash)) { out.write(bytes); }
                 }
-                // Save this request
+                // A failed blob/close never publishes a reference to a missing blob.
                 index.put(requestId, hash);
                 replayFile.writeResourcePackIndex(index);
             }
-            if (doWrite) {
-                try (OutputStream out = replayFile.writeResourcePack(hash)) {
-                    out.write(bytes);
-                }
-            }
-        } catch (IOException e) {
-            logger.warn("Failed to save resource pack.", e);
+        } catch (Throwable failure) {
+            if (firstFailure == null) firstFailure = failure;
+            logger.warn("Failed to save resource pack.", failure);
         }
+    }
+
+    /** Called by the saving worker without holding replayFile. Waits for the entire admitted callback. */
+    public synchronized void seal() throws IOException {
+        sealed = true;
+        mcIdToReplayId.clear();
+        if (firstFailure != null) throw new IOException("Resource-pack recording failed", firstFailure);
     }
 
     //#if MC>=12003
-    private final Map<UUID, Integer> mcIdToReplayId = new HashMap<>();
+    private final Map<UUID, java.util.ArrayDeque<Integer>> mcIdToReplayId = new HashMap<>();
+    // A consent screen may delay onAdd until after another recording starts. NEVER use the
+    // current listener there. Values do not strongly reference the UUID key or the recorder.
+    // MC's verified caller chain carries the packet's UUID through consent and into PackEntry.
+    private static final Map<UUID, java.util.List<DownloadRequest>> pendingDownloads = new java.util.WeakHashMap<>();
+
+    public static final class DownloadRequest {
+        private final java.lang.ref.WeakReference<ResourcePackRecorder> recorder;
+        private final int request;
+        private DownloadRequest(ResourcePackRecorder recorder, int request) {
+            this.recorder = new java.lang.ref.WeakReference<>(recorder); this.request = request;
+        }
+        public void record(Path file) {
+            ResourcePackRecorder owner = recorder.get();
+            if (owner != null) owner.recordResourcePack(file, request);
+        }
+    }
 
     public synchronized ResourcePackSendS2CPacket handleResourcePack(ClientConnection netManager, ResourcePackSendS2CPacket packet) {
+        if (sealed) return packet;
         final int requestId = nextRequestId++;
-        mcIdToReplayId.put(packet.id(), requestId);
+        mcIdToReplayId.computeIfAbsent(packet.id(), ignored -> new java.util.ArrayDeque<>()).addLast(requestId);
+        synchronized (pendingDownloads) {
+            pendingDownloads.computeIfAbsent(packet.id(), ignored -> new java.util.ArrayList<>())
+                    .add(new DownloadRequest(this, requestId));
+        }
         return new ResourcePackSendS2CPacket(packet.id(), "replay://" + requestId, "", packet.required(), packet.prompt());
     }
 
-    public void recordResourcePack(Path file, UUID uuid) {
-        Integer id = mcIdToReplayId.get(uuid);
-        if (id == null) {
-            logger.warn("Got resource pack download for unexpected uuid " + uuid + " at " + file);
+    /** One proven request is bound once to PackEntry identity. Ambiguous delayed consent is rejected. */
+    public static DownloadRequest claimDownloadRequest(UUID uuid) {
+        DownloadRequest request;
+        synchronized (pendingDownloads) {
+            java.util.List<DownloadRequest> requests = pendingDownloads.get(uuid);
+            if (requests == null) return null;
+            if (requests.size() != 1) {
+                // Retain this weak-key tombstone: guessing FIFO could attach old consent to a new task.
+                logger.warn("Ambiguous reused resource-pack UUID before onAdd; not recording this download: " + uuid);
+                return null;
+            }
+            request = requests.getFirst();
+            pendingDownloads.remove(uuid);
+        } // Never take a recorder monitor while holding the pending-map monitor.
+        ResourcePackRecorder owner = request.recorder.get();
+        if (owner == null) return null;
+        synchronized (owner) {
+            if (owner.sealed) return null;
+            java.util.ArrayDeque<Integer> ids = owner.mcIdToReplayId.get(uuid);
+            if (ids == null || !ids.removeFirstOccurrence(request.request)) return null;
+            if (ids.isEmpty()) owner.mcIdToReplayId.remove(uuid);
+        }
+        return request;
+    }
+
+    public synchronized void recordResourcePack(Path file, UUID uuid) {
+        if (sealed) return;
+        java.util.ArrayDeque<Integer> ids = mcIdToReplayId.get(uuid);
+        if (ids == null || ids.size() != 1) {
+            logger.warn("Got resource pack download without unique request ownership: " + uuid);
             return;
         }
+        int id = ids.removeFirst(); mcIdToReplayId.remove(uuid);
         recordResourcePack(file, id);
     }
     //#elseif MC>=10800

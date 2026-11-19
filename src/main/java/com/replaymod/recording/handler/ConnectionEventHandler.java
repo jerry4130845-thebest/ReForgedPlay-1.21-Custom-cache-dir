@@ -1,6 +1,10 @@
 package com.replaymod.recording.handler;
 
 import com.replaymod.core.ReplayMod;
+import com.replaymod.core.files.ReplayStorageLayout;
+import com.replaymod.core.files.ReplayFilesService;
+import com.replaymod.core.files.ManagedReplayFile;
+import java.nio.file.Files;
 import com.replaymod.core.utils.ModCompat;
 import com.replaymod.core.utils.Utils;
 import com.replaymod.editor.gui.MarkerProcessor;
@@ -64,6 +68,8 @@ public class ConnectionEventHandler {
     }
 
     public void onConnectedToServerEvent(ClientConnection networkManager) {
+        ReplayFile initializingReplay = null;
+        PacketListener initializingListener = null;
         try {
             boolean local = networkManager.isLocal();
             if (local) {
@@ -141,8 +147,10 @@ public class ConnectionEventHandler {
             }
 
             String name = sdf.format(Calendar.getInstance().getTime());
-            Path outputPath = Utils.replayNameToPath(core.folders.getRecordingFolder(), name);
-            ReplayFile replayFile = core.files.open(outputPath);
+            ReplayStorageLayout layout = core.folders.snapshotStorageLayout();
+            Files.createDirectories(layout.recordingRoot());
+            Path outputPath = ReplayFilesService.selectNewRecordingPath(Utils.replayNameToPath(layout.recordingRoot(), name));
+            ReplayFile replayFile = initializingReplay = core.files.open(layout, null, outputPath);
 
             replayFile.writeModInfo(ModCompat.getInstalledNetworkMods());
 
@@ -154,7 +162,7 @@ public class ConnectionEventHandler {
             metaData.setDate(System.currentTimeMillis());
             metaData.setMcVersion(ReplayMod.instance.getMinecraftVersion());
             Channel channel = ((NetworkManagerAccessor) networkManager).getChannel();
-            packetListener = new PacketListener(core, channel, outputPath, replayFile, metaData);
+            packetListener = initializingListener = new PacketListener(core, channel, outputPath, replayFile, metaData, layout);
 
             //#if MC>=12005
             String target = channel.pipeline().get("inbound_config") != null ? "inbound_config" : PacketListener.DECODER_KEY;
@@ -187,6 +195,11 @@ public class ConnectionEventHandler {
                 packetListener.addMarker(MarkerProcessor.MARKER_NAME_START_CUT, 0);
             }
         } catch (Throwable e) {
+            if (initializingListener != null) initializingListener.abortRecording(e);
+            else if (initializingReplay != null) {
+                if (initializingReplay instanceof ManagedReplayFile managed) managed.preserveRecovery(e);
+                try { initializingReplay.close(); } catch (Throwable close) { e.addSuppressed(close); }
+            }
             e.printStackTrace();
             core.printWarningToChat("replaymod.chat.recordingfailed");
         }
@@ -194,11 +207,11 @@ public class ConnectionEventHandler {
 
     public void reset() {
         if (packetListener != null) {
-            guiControls.unregister();
+            if (guiControls != null) guiControls.unregister();
             guiControls = null;
-            guiOverlay.unregister();
+            if (guiOverlay != null) guiOverlay.unregister();
             guiOverlay = null;
-            recordingEventHandler.unregister();
+            if (recordingEventHandler != null) recordingEventHandler.unregister();
             recordingEventHandler = null;
             packetListener = null;
         }

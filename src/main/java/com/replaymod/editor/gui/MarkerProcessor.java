@@ -2,6 +2,9 @@ package com.replaymod.editor.gui;
 
 import com.replaymod.core.ReplayMod;
 import com.replaymod.core.files.ReplayFileOperations;
+import com.replaymod.core.files.ReplayStorageLayout;
+import com.replaymod.core.files.ManagedReplayFile;
+import java.nio.file.Files;
 import com.replaymod.core.versions.MCVer;
 import com.replaymod.replaystudio.PacketData;
 import com.replaymod.replaystudio.data.Marker;
@@ -49,9 +52,19 @@ public class MarkerProcessor {
      */
     public static final String MARKER_NAME_SPLIT = "_RM_SPLIT";
 
-    private static boolean hasWork(Path path) throws IOException {
-        try (ReplayFile inputReplayFile = ReplayMod.instance.files.open(path)) {
-            return inputReplayFile.getMarkers().or(HashSet::new).stream().anyMatch(m -> m.getName() != null && m.getName().startsWith("_RM_"));
+    private static boolean hasWork(Path path, ReplayStorageLayout layout) throws IOException {
+        ReplayFile input = ReplayMod.instance.files.openReadOnly(layout, path);
+        boolean work;
+        try (input) {
+            work = input.getMarkers().or(HashSet::new).stream().anyMatch(m -> m.getName() != null && m.getName().startsWith("_RM_"));
+        }
+        requireReleased(input, path);
+        return work;
+    }
+
+    private static void requireReleased(ReplayFile file, Path path) throws IOException {
+        if (!(file instanceof ManagedReplayFile managed) || !managed.isReleased()) {
+            throw new IOException("Marker processor has no actual replay release receipt: " + path);
         }
     }
 
@@ -111,12 +124,17 @@ public class MarkerProcessor {
     }
 
     public static List<Pair<Path, ReplayMetaData>> apply(Path path, Consumer<Float> progress) throws IOException {
+        return apply(path, progress, ReplayMod.instance.folders.snapshotStorageLayout());
+    }
+
+    public static List<Pair<Path, ReplayMetaData>> apply(Path path, Consumer<Float> progress,
+            ReplayStorageLayout layout) throws IOException {
         ReplayMod mod = ReplayMod.instance;
-        if (!hasWork(path)) {
+        if (!hasWork(path, layout)) {
             ReplayMetaData metaData;
-            try (ReplayFile inputReplayFile = mod.files.open(path)) {
-                metaData = inputReplayFile.getMetaData();
-            }
+            ReplayFile input = mod.files.openReadOnly(layout, path);
+            try (input) { metaData = input.getMetaData(); }
+            requireReleased(input, path);
             return Collections.singletonList(Pair.of(path, metaData));
         }
 
@@ -129,27 +147,43 @@ public class MarkerProcessor {
 
         List<Pair<Path, ReplayMetaData>> outputPaths = new ArrayList<>();
 
-        Path rawFolder = ReplayMod.instance.folders.getRawReplayFolder();
-        Path inputPath = ReplayFileOperations.moveToRaw(path, rawFolder);
+        ReplayFileOperations.Protection protection = null;
+        Path inputPath;
+        if (layout.rawBackupEnabled()) {
+            Files.createDirectories(layout.rawRoot());
+            inputPath = ReplayFileOperations.moveToRaw(path, layout.rawRoot());
+        } else {
+            protection = ReplayFileOperations.protectInput(path);
+            inputPath = protection.input();
+        }
 
-        try (ReplayFile inputReplayFile = mod.files.open(inputPath)) {
+        ReplayFile input = null;
+        try {
+        input = mod.files.openReadOnly(layout, inputPath);
+        try (ReplayFile inputReplayFile = input) {
             List<Marker> markers = inputReplayFile.getMarkers().or(HashSet::new)
                     .stream().sorted(Comparator.comparing(Marker::getTime)).collect(Collectors.toList());
             Iterator<Marker> markerIterator = markers.iterator();
-            Iterator<String> outputFileSuffixes = getOutputSuffixes(inputReplayFile).iterator();
-            boolean anySplit = markers.stream().anyMatch(m -> MARKER_NAME_SPLIT.equals(m.getName()));
+            List<String> expectedSuffixes = getOutputSuffixes(inputReplayFile);
+            Iterator<String> outputFileSuffixes = expectedSuffixes.iterator();
+            if (protection != null) {
+                List<Path> expectedPaths = new ArrayList<>();
+                for (String suffix : expectedSuffixes) expectedPaths.add(path.resolveSibling(replayName + suffix + ".mcpr"));
+                protection.describeOutputs(expectedPaths);
+            }
 
             int inputDuration = inputReplayFile.getMetaData().getDuration();
-            ReplayInputStream replayInputStream = inputReplayFile.getPacketData(registry);
+            try (ReplayInputStream replayInputStream = inputReplayFile.getPacketData(registry)) {
             int timeOffset = 0;
             SquashFilter cutFilter = null;
             int startCutOffset = 0;
             PacketData nextPacket = replayInputStream.readPacket();
-            Marker nextMarker = markerIterator.next();
+            Marker nextMarker = markerIterator.hasNext() ? markerIterator.next() : null;
 
+            try {
             while (nextPacket != null && outputFileSuffixes.hasNext()) {
                 Path outputPath = path.resolveSibling(replayName + outputFileSuffixes.next() + ".mcpr");
-                try (ReplayFile outputReplayFile = mod.files.open(null, outputPath)) {
+                try (ReplayFile outputReplayFile = mod.files.open(layout, null, outputPath)) {
                     long duration = 0;
                     Set<Marker> outputMarkers = new HashSet<>();
                     ReplayMetaData metaData = inputReplayFile.getMetaData();
@@ -217,6 +251,7 @@ public class MarkerProcessor {
                                 duration = nextPacket.getTime() - timeOffset;
                             }
                             nextPacket.release();
+                            nextPacket = null;
                             nextPacket = replayInputStream.readPacket();
                             if (nextPacket != null) {
                                 progress.accept((float) nextPacket.getTime() / (float) inputDuration);
@@ -248,16 +283,34 @@ public class MarkerProcessor {
 
                     outputReplayFile.save();
 
+                    outputReplayFile.close();
+                    if (!(outputReplayFile instanceof ManagedReplayFile managed) || !managed.isReleased()) {
+                        throw new IOException("Clip writer has not actually released " + outputPath);
+                    }
+                    if (protection != null) protection.outputClosed(outputPath);
                     outputPaths.add(Pair.of(outputPath, metaData));
                 }
             }
 
-            squashFilter.release();
-            if (cutFilter != null) {
-                cutFilter.release();
+            if (outputPaths.size() != expectedSuffixes.size()) {
+                throw new IOException("Not all expected clips were produced; input=" + inputPath
+                        + "; completed=" + outputPaths.size() + "; expected=" + expectedSuffixes.size());
             }
+            } finally {
+                if (nextPacket != null) nextPacket.release();
+                if (cutFilter != null) cutFilter.release();
+                squashFilter.release();
+            }
+            } // packet stream actually closed BEFORE the read-only file close
         }
-
+        if (!(input instanceof ManagedReplayFile managed) || !managed.isReleased()) {
+            throw new IOException("Clip input reader has not actually released " + inputPath);
+        }
+        if (protection != null) protection.complete(); // never in finally, never after only one clip
         return outputPaths;
+        } catch (IOException | RuntimeException | Error failure) {
+            if (protection != null) throw protection.failure(failure);
+            throw new IOException("Clipping failed; complete raw input=" + inputPath, failure);
+        }
     }
 }

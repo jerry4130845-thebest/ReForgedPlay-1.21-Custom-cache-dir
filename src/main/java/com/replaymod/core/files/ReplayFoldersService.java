@@ -539,15 +539,33 @@ public class ReplayFoldersService {
         }
     }
 
+    /** One registry read: callbacks never expose half of a storage draft to a new task. */
+    public ReplayStorageLayout snapshotStorageLayout() throws IOException {
+        java.util.Map<SettingsRegistry.SettingKey<?>, Object> snapshot = settings.snapshot();
+        return ReplayStorageLayout.resolve(mcDir,
+                (String) snapshot.get(Setting.RECORDING_PATH), (String) snapshot.get(Setting.RAW_PATH),
+                (String) snapshot.get(Setting.RECORDING_WORK_PATH), (String) snapshot.get(Setting.TMP_PATH),
+                (String) snapshot.get(Setting.CACHE_PATH), (String) snapshot.get(Setting.TEMP_PATH),
+                (Boolean) snapshot.get(Setting.EPHEMERAL_CACHE), (Boolean) snapshot.get(Setting.RAW_BACKUP_ENABLED));
+    }
+
+    /** Native tasks snapshot only tempPath; this does not allocate an image/video task. */
+    public Path snapshotNativeTempRoot() throws IOException {
+        String value = (String) settings.snapshot().get(Setting.TEMP_PATH);
+        return value == null || value.isBlank() ? null : ReplayStorageLayout.resolvePath(mcDir, value);
+    }
+
     public Path getReplayFolder() throws IOException {
-        return ensureDirectoryExists(mcDir.resolve(settings.get(Setting.RECORDING_PATH)));
+        return ensureDirectoryExists(snapshotStorageLayout().replayRoot());
     }
 
     /**
      * Folder into which replay backups are saved before the MarkerProcessor is unleashed.
      */
     public Path getRawReplayFolder() throws IOException {
-        return ensureDirectoryExists(getReplayFolder().resolve("raw"));
+        ReplayStorageLayout layout = snapshotStorageLayout();
+        if (!layout.rawBackupEnabled()) throw new IOException("Raw backups are disabled for this task");
+        return ensureDirectoryExists(layout.rawRoot());
     }
 
     /**
@@ -555,7 +573,7 @@ public class ReplayFoldersService {
      * Distinct from the main folder, so they cannot be opened while they are still saving.
      */
     public Path getRecordingFolder() throws IOException {
-        return ensureDirectoryExists(getReplayFolder().resolve("recording"));
+        return ensureDirectoryExists(snapshotStorageLayout().recordingRoot());
     }
 
     /**
@@ -563,7 +581,7 @@ public class ReplayFoldersService {
      * Distinct from the recording folder cause people kept confusing them with recordings.
      */
     public Path getCacheFolder() throws IOException {
-        Path path = ensureDirectoryExists(mcDir.resolve(settings.get(Setting.CACHE_PATH)));
+        Path path = ensureDirectoryExists(snapshotStorageLayout().cacheRoot());
         try {
             Files.setAttribute(path, "dos:hidden", true);
         } catch (UnsupportedOperationException ignored) {
@@ -573,18 +591,13 @@ public class ReplayFoldersService {
         return path;
     }
 
-    private static final PercentEscaper CACHE_FILE_NAME_ENCODER = new PercentEscaper("-_ ", false);
-
+    /** Identity container only. Payload access must hold an actual ReplayCacheLease. */
     public Path getCachePathForReplay(Path replay) throws IOException {
-        Path replayFolder = getReplayFolder();
-        Path cacheFolder = getCacheFolder();
-        Path relative = replayFolder.toAbsolutePath().relativize(replay.toAbsolutePath());
-        return cacheFolder.resolve(CACHE_FILE_NAME_ENCODER.escape(relative.toString()));
+        return ReplayCacheLease.identityDirectory(snapshotStorageLayout(), replay);
     }
 
+    /** Unknown/URL legacy names do not grant filesystem access or cleanup authority. */
     public Path getReplayPathForCache(Path cache) throws IOException {
-        String relative = URLDecoder.decode(cache.getFileName().toString(), "UTF-8");
-        Path replayFolder = getReplayFolder();
-        return replayFolder.resolve(relative);
+        return ReplayCacheLease.replayForCache(snapshotStorageLayout(), cache);
     }
 }

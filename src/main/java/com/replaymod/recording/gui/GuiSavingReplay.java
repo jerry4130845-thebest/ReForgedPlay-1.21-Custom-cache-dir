@@ -1,6 +1,9 @@
 package com.replaymod.recording.gui;
 
 import com.replaymod.core.ReplayMod;
+import com.replaymod.core.files.ReplayStorageLayout;
+import com.replaymod.core.files.ReplayFileOperations;
+import java.util.concurrent.atomic.AtomicBoolean;
 import com.replaymod.core.utils.Utils;
 import com.replaymod.recording.Setting;
 import com.replaymod.replay.gui.screen.GuiReplayViewer;
@@ -54,10 +57,27 @@ public class GuiSavingReplay {
             .addElements(new VerticalLayout.Data(0.5), label, progressBar);
 
     private final ReplayMod core;
-    private final List<Runnable> apply = new ArrayList<>();
+    private final ReplayStorageLayout layout;
+    private final List<Output> outputs = new ArrayList<>();
+    private final AtomicBoolean applying = new AtomicBoolean();
 
-    public GuiSavingReplay(ReplayMod core) {
+    private static final class Output {
+        Path path;
+        final GuiTextField field;
+        boolean completed;
+        IOException incomplete;
+        Output(Path path, GuiTextField field) { this.path = path; this.field = field; }
+    }
+    private record Request(Output output, String name) {}
+
+    public GuiSavingReplay(ReplayMod core) { this(core, snapshot(core)); }
+    public GuiSavingReplay(ReplayMod core, ReplayStorageLayout layout) {
         this.core = core;
+        this.layout = layout;
+    }
+    private static ReplayStorageLayout snapshot(ReplayMod core) {
+        try { return core.folders.snapshotStorageLayout(); }
+        catch (IOException failure) { throw new java.io.UncheckedIOException(failure); }
     }
 
     public void open() {
@@ -112,7 +132,7 @@ public class GuiSavingReplay {
                 .addElements(null, textField, clearButton);
         panel.addElements(new VerticalLayout.Data(0.5), row);
 
-        apply.add(() -> applyOutput(path, textField.getText()));
+        outputs.add(new Output(path, textField));
 
         return textField;
     }
@@ -137,33 +157,53 @@ public class GuiSavingReplay {
     }
 
     private void apply() {
-        apply.forEach(Runnable::run);
-        close();
-    }
-
-    private void applyOutput(Path path, String newName) {
-        if (newName.isEmpty()) {
+        if (!mc.isOnThread()) { core.runLater(this::apply); return; }
+        if (!applying.compareAndSet(false, true)) return;
+        // Snapshot every widget on the client thread. The worker never reads GUI state/settings.
+        List<Request> requests = new ArrayList<>();
+        for (Output output : outputs) if (!output.completed) requests.add(new Request(output, output.field.getText()));
+        Runnable worker = () -> {
+            Throwable failure = null;
             try {
-                Files.delete(path);
-            } catch (IOException e) {
-                logger.error("Deleting replay file:", e);
-                CrashReport crashReport = CrashReport.create(e, "Deleting replay file");
-                core.runLater(() -> Utils.error(logger, VanillaGuiScreen.wrap(mc.currentScreen), crashReport, () -> {}));
+                for (Request request : requests) {
+                    Output output = request.output();
+                    if (output.incomplete != null) throw output.incomplete; // never republish a partial move
+                    if (request.name().isEmpty()) {
+                        Files.delete(output.path); // only an explicitly empty snapshotted name deletes
+                    } else {
+                        Files.createDirectories(layout.replayRoot());
+                        Path desired = Utils.replayNameToPath(layout.replayRoot(), request.name());
+                        try {
+                            output.path = ReplayFileOperations.publishReplay(output.path, layout.replayRoot(),
+                                    desired.getFileName().toString());
+                        } catch (ReplayFileOperations.IncompletePublicationException partial) {
+                            output.path = partial.publishedPath();
+                            output.incomplete = partial;
+                            throw partial;
+                        }
+                    }
+                    output.completed = true; // actual receipt; later retry skips already published/deleted items
+                }
+            } catch (Throwable problem) { failure = problem; logger.error("Publishing replay files:", problem); }
+            Throwable result = failure;
+            try {
+                core.runLater(() -> {
+                    applying.set(false);
+                    if (result == null) close();
+                    else Utils.error(logger, VanillaGuiScreen.wrap(mc.currentScreen),
+                            CrashReport.create(result, "Publishing replay files"), () -> {});
+                    // On failure keep this panel and its actual publication receipts for retry.
+                });
+            } catch (Throwable scheduling) {
+                applying.set(false);
+                logger.error("Replay publication GUI scheduling failed; actual path receipts retained for retry", scheduling);
             }
-            return;
-        }
-
-        try {
-            Path replaysFolder = core.folders.getReplayFolder();
-            Path newPath = Utils.replayNameToPath(replaysFolder, newName);
-            for (int i = 1; Files.exists(newPath); i++) {
-                newPath = Utils.replayNameToPath(replaysFolder, newName + " (" + i + ")");
-            }
-            Files.move(path, newPath);
-        } catch (IOException e) {
-            logger.error("Renaming replay file:", e);
-            CrashReport crashReport = CrashReport.create(e, "Renaming replay file");
-            core.runLater(() -> Utils.error(logger, VanillaGuiScreen.wrap(mc.currentScreen), crashReport, () -> {}));
+        };
+        try { new Thread(worker, "replaymod-publish-replays").start(); }
+        catch (Throwable failure) {
+            applying.set(false);
+            Utils.error(logger, VanillaGuiScreen.wrap(mc.currentScreen),
+                    CrashReport.create(failure, "Starting replay publication"), () -> {});
         }
     }
 }

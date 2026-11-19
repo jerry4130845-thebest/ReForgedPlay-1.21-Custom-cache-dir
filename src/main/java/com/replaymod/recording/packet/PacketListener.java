@@ -4,6 +4,9 @@ import com.github.steveice10.netty.buffer.PooledByteBufAllocator;
 import com.github.steveice10.packetlib.tcp.io.ByteBufNetOutput;
 import com.google.gson.Gson;
 import com.replaymod.core.ReplayMod;
+import com.replaymod.core.files.ReplayStorageLayout;
+import com.replaymod.core.files.ManagedReplayFile;
+import com.replaymod.core.files.ReplayFileOperations;
 import com.replaymod.core.utils.Restrictions;
 import com.replaymod.core.utils.Utils;
 import com.replaymod.core.versions.MCVer;
@@ -83,6 +86,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static com.replaymod.core.versions.MCVer.*;
 import static com.replaymod.replaystudio.util.Utils.writeInt;
@@ -106,6 +111,11 @@ public class PacketListener extends ChannelInboundHandlerAdapter {
 
     private final ReplayMod core;
     private final Path outputPath;
+    private final ReplayStorageLayout layout;
+    private final Object admission = new Object();
+    private boolean accepting = true, finishing, finalQueued;
+    private int pendingMain;
+    private final AtomicReference<Throwable> firstFailure = new AtomicReference<>();
     private final ReplayFile replayFile;
 
     private final ResourcePackRecorder resourcePackRecorder;
@@ -119,7 +129,7 @@ public class PacketListener extends ChannelInboundHandlerAdapter {
     private Packet currentRawPacket;
 
     private final long startTime;
-    private long lastSentPacket;
+    private volatile long lastSentPacket;
     private long timePassedWhilePaused;
     private volatile boolean serverWasPaused;
 
@@ -130,7 +140,13 @@ public class PacketListener extends ChannelInboundHandlerAdapter {
     private final AtomicInteger lastSaveMetaDataId = new AtomicInteger();
 
     public PacketListener(ReplayMod core, Channel channel, Path outputPath, ReplayFile replayFile, ReplayMetaData metaData) throws IOException {
+        this(core, channel, outputPath, replayFile, metaData, core.folders.snapshotStorageLayout());
+    }
+
+    public PacketListener(ReplayMod core, Channel channel, Path outputPath, ReplayFile replayFile,
+            ReplayMetaData metaData, ReplayStorageLayout layout) throws IOException {
         this.core = core;
+        this.layout = layout;
         this.channel = channel;
         this.outputPath = outputPath;
         this.replayFile = replayFile;
@@ -142,56 +158,131 @@ public class PacketListener extends ChannelInboundHandlerAdapter {
         saveMetaData();
     }
 
-    private void saveMetaData() {
-        int id = lastSaveMetaDataId.incrementAndGet();
-        saveService.submit(() -> {
-            if (lastSaveMetaDataId.get() != id) {
-                return; // Another job has been scheduled, it will do the hard work.
-            }
-            try {
-                synchronized (replayFile) {
-                    if (ReplayMod.isMinimalMode()) {
-                        metaData.setFileFormat("MCPR");
-                        metaData.setFileFormatVersion(ReplayMetaData.CURRENT_FILE_FORMAT_VERSION);
-                        metaData.setProtocolVersion(MCVer.getProtocolVersion());
-                        metaData.setGenerator("ReplayMod in Minimal Mode");
+    private void failed(Throwable failure) {
+        firstFailure.compareAndSet(null, failure);
+        logger.error("Recording task failed; output=" + outputPath, failure);
+    }
 
-                        try (OutputStream out = replayFile.write("metaData.json")) {
-                            String json = (new Gson()).toJson(metaData);
-                            out.write(json.getBytes());
-                        }
-                    } else {
-                        replayFile.writeMetaData(MCVer.getPacketTypeRegistry(State.LOGIN), metaData);
+    /** A ticket is acquired BEFORE main-thread dispatch. Sealing cannot revoke an already admitted ticket. */
+    private boolean admit(Runnable rejected) {
+        synchronized (admission) {
+            if (!accepting) { rejected.run(); return false; }
+            pendingMain++;
+            return true;
+        }
+    }
+
+    private void onMain(Runnable work, Runnable rejected) {
+        if (admit(rejected)) dispatchMain(work, rejected);
+    }
+
+    private void dispatchMain(Runnable work, Runnable rejected) {
+        AtomicBoolean claimed = new AtomicBoolean();
+        Runnable task = () -> {
+            if (!claimed.compareAndSet(false, true)) return;
+            try { work.run(); }
+            catch (Throwable failure) { failed(failure); }
+            finally { mainDone(); }
+        };
+        try {
+            // MC clears its own task queue on disconnect; admitted recording work must survive it.
+            if (mc.isOnThread()) task.run(); else core.runLater(task);
+        } catch (Throwable failure) {
+            if (claimed.compareAndSet(false, true)) {
+                try { rejected.run(); } finally { failed(failure); mainDone(); }
+            } else failed(failure);
+        }
+    }
+
+    private void mainDone() {
+        boolean finish;
+        synchronized (admission) { pendingMain--; finish = finishing && pendingMain == 0; }
+        if (finish) queueFinalMetadata();
+    }
+
+    private boolean submit(Runnable task) {
+        try {
+            saveService.submit(() -> {
+                try { task.run(); } catch (Throwable failure) { failed(failure); }
+            });
+            return true;
+        } catch (Throwable failure) { failed(failure); return false; }
+    }
+
+    private ReplayMetaData snapshotMetadata() {
+        // All mutable metadata is read on the client thread, never by the writer.
+        Gson gson = new Gson();
+        return gson.fromJson(gson.toJson(metaData), ReplayMetaData.class);
+    }
+
+    private void writeMetadata(ReplayMetaData snapshot) {
+        try {
+            synchronized (replayFile) {
+                if (ReplayMod.isMinimalMode()) {
+                    snapshot.setFileFormat("MCPR");
+                    snapshot.setFileFormatVersion(ReplayMetaData.CURRENT_FILE_FORMAT_VERSION);
+                    snapshot.setProtocolVersion(MCVer.getProtocolVersion());
+                    snapshot.setGenerator("ReplayMod in Minimal Mode");
+                    try (OutputStream out = replayFile.write("metaData.json")) {
+                        out.write(new Gson().toJson(snapshot).getBytes(java.nio.charset.StandardCharsets.UTF_8));
                     }
-                }
-            } catch (IOException e) {
-                logger.error("Writing metadata:", e);
+                } else replayFile.writeMetaData(MCVer.getPacketTypeRegistry(State.LOGIN), snapshot);
             }
-        });
+        } catch (IOException failure) { throw new java.io.UncheckedIOException(failure); }
+    }
+
+    private void saveMetaData() {
+        onMain(() -> {
+            int id = lastSaveMetaDataId.incrementAndGet();
+            ReplayMetaData snapshot = snapshotMetadata();
+            submit(() -> { if (lastSaveMetaDataId.get() == id) writeMetadata(snapshot); });
+        }, () -> {});
+    }
+
+    private void queueFinalMetadata() {
+        synchronized (admission) {
+            if (finalQueued || !finishing || pendingMain != 0) return;
+            finalQueued = true;
+        }
+        AtomicBoolean claimed = new AtomicBoolean();
+        Runnable finish = () -> {
+            if (!claimed.compareAndSet(false, true)) return;
+            try {
+                metaData.setDuration((int) lastSentPacket);
+                lastSaveMetaDataId.incrementAndGet();
+                ReplayMetaData snapshot = snapshotMetadata();
+                // The only internal final write bypasses public admission. No accepted ticket remains.
+                submit(() -> writeMetadata(snapshot));
+            } catch (Throwable failure) { failed(failure); }
+            finally { saveService.shutdown(); synchronized (admission) { admission.notifyAll(); } }
+        };
+        try { if (mc.isOnThread()) finish.run(); else core.runLater(finish); }
+        catch (Throwable failure) {
+            failed(failure);
+            if (claimed.compareAndSet(false, true)) saveService.shutdown();
+            synchronized (admission) { admission.notifyAll(); }
+        }
     }
 
     public void save(net.minecraft.network.packet.Packet packet) {
-        Packet encoded;
+        if (!admit(() -> {})) return;
+        final Packet encoded;
         try {
+            // Preserve the inbound pipeline state while encoding, but carry this SAME ticket
+            // through main-thread dispatch. Never recurse through public save after sealing.
             encoded = encodeMcPacket(getConnectionState(), packet);
-        } catch (Exception e) {
-            logger.error("Encoding packet:", e);
-            return;
-        }
-        save(encoded);
+        } catch (Throwable failure) { failed(failure); mainDone(); return; }
+        dispatchMain(() -> saveAccepted(encoded), encoded::release);
     }
 
+    /** Transfers ownership of one packet reference, including on rejection. */
     public void save(Packet packet) {
-        // If we're not on the main thread (i.e. we're on the netty thread), then we need to schedule the saving
-        // to happen on the main thread so we can guarantee correct ordering of inbound and inject packets.
-        // Otherwise, injected packets may end up further down the packet stream than they were supposed to and other
-        // inbound packets which may rely on the injected packet would behave incorrectly when played back.
-        if (!mc.isOnThread()) {
-            mc.send(() -> save(packet));
-            return;
-        }
-        try {
+        onMain(() -> saveAccepted(packet), packet::release);
+    }
 
+    private void saveAccepted(Packet packet) {
+        boolean transferred = false;
+        try {
             long now = System.currentTimeMillis();
             if (serverWasPaused) {
                 timePassedWhilePaused = now - startTime - lastSentPacket;
@@ -200,110 +291,131 @@ public class PacketListener extends ChannelInboundHandlerAdapter {
             int timestamp = (int) (now - startTime - timePassedWhilePaused);
             lastSentPacket = timestamp;
             PacketData packetData = new PacketData(timestamp, packet);
-            saveService.submit(() -> {
-                try {
-                    if (ReplayMod.isMinimalMode()) {
-                        // Minimal mode, ReplayStudio might not know our packet ids, so we cannot use it
-                        com.github.steveice10.netty.buffer.ByteBuf packetIdBuf = PooledByteBufAllocator.DEFAULT.buffer();
-                        com.github.steveice10.netty.buffer.ByteBuf packetBuf = packetData.getPacket().getBuf();
-                        try {
-                            new ByteBufNetOutput(packetIdBuf).writeVarInt(packetData.getPacket().getId());
+            transferred = submit(() -> writePacket(packetData));
+        } finally { if (!transferred) packet.release(); }
+    }
 
-                            int packetIdLen = packetIdBuf.readableBytes();
-                            int packetBufLen = packetBuf.readableBytes();
-                            writeInt(packetOutputStream, (int) packetData.getTime());
-                            writeInt(packetOutputStream, packetIdLen + packetBufLen);
-                            packetIdBuf.readBytes(packetOutputStream, packetIdLen);
-                            packetBuf.getBytes(packetBuf.readerIndex(), packetOutputStream, packetBufLen);
-                        } finally {
-                            packetIdBuf.release();
-                            packetBuf.release();
-                        }
-                    } else {
-                        packetOutputStream.write(packetData);
-                    }
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            });
-        } catch(Exception e) {
-            logger.error("Writing packet:", e);
+    private void writePacket(PacketData data) {
+        var buf = data.getPacket().getBuf();
+        if (ReplayMod.isMinimalMode()) {
+            com.github.steveice10.netty.buffer.ByteBuf ids = null;
+            try {
+                ids = PooledByteBufAllocator.DEFAULT.buffer();
+                new ByteBufNetOutput(ids).writeVarInt(data.getPacket().getId());
+                int idLength = ids.readableBytes(), length = buf.readableBytes();
+                writeInt(packetOutputStream, (int) data.getTime());
+                writeInt(packetOutputStream, idLength + length);
+                ids.readBytes(packetOutputStream, idLength);
+                buf.getBytes(buf.readerIndex(), packetOutputStream, length);
+            } catch (IOException failure) { throw new java.io.UncheckedIOException(failure); }
+            finally { if (ids != null) ids.release(); data.release(); }
+        } else {
+            // Verified ReplayStudio doWrite consumes the packet on success AND IO failure.
+            // A failure in its synthetic-login preamble precedes doWrite, however. The transferred
+            // packet may not be used concurrently by its caller; compare the public reference count
+            // so only that pre-consumption failure releases here (never blindly double-release).
+            int references = buf.refCnt();
+            try { packetOutputStream.write(data); }
+            catch (IOException failure) { throw new java.io.UncheckedIOException(failure); }
+            finally { if (buf.refCnt() == references) data.release(); }
         }
+    }
+
+    public void abortRecording(Throwable failure) {
+        failed(failure);
+        channelInactive(null);
     }
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
-        metaData.setDuration((int) lastSentPacket);
-        saveMetaData();
+        synchronized (admission) {
+            if (finishing) return;
+            accepting = false;
+            finishing = true;
+        }
+        try {
+            core.runLater(() -> {
+                ConnectionEventHandler handler = ReplayModRecording.instance.getConnectionEventHandler();
+                if (handler.getPacketListener() == this) handler.reset();
+            });
+        } catch (Throwable failure) { failed(failure); }
+        GuiSavingReplay gui = new GuiSavingReplay(core, layout);
+        new Thread(() -> finishRecording(gui), "replaymod-recording-save").start();
+        queueFinalMetadata();
+    }
 
-        core.runLater(() -> {
-            ConnectionEventHandler connectionEventHandler = ReplayModRecording.instance.getConnectionEventHandler();
-            if (connectionEventHandler.getPacketListener() == this) {
-                connectionEventHandler.reset();
-            }
-        });
+    private void preserve(Throwable failure) {
+        if (replayFile instanceof ManagedReplayFile managed) {
+            managed.preserveRecovery(failure);
+            try { logger.error("Recovery record: " + managed.recoveryRecord()); }
+            catch (IOException diagnostic) { failure.addSuppressed(diagnostic); }
+        }
+    }
 
-        GuiSavingReplay guiSavingReplay = new GuiSavingReplay(core);
-        new Thread(() -> {
-            core.runLater(guiSavingReplay::open);
+    private void showFailure(GuiSavingReplay gui, Throwable failure) {
+        preserve(failure);
+        try {
+            core.runLater(() -> Utils.error(logger, VanillaGuiScreen.wrap(mc.currentScreen),
+                    CrashReport.create(failure, "Saving replay file; output=" + outputPath), gui::close));
+        } catch (Throwable scheduling) { logger.error("Cannot display recording failure", scheduling); }
+    }
 
-            saveService.shutdown();
-            try {
-                saveService.awaitTermination(10, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                logger.error("Waiting for save service termination:", e);
-            }
-            try {
-                packetOutputStream.close();
-            } catch (IOException e) {
-                logger.error("Failed to close packet output stream:", e);
-            }
-
-            List<Pair<Path, ReplayMetaData>> outputPaths;
-            synchronized (replayFile) {
+    private void finishRecording(GuiSavingReplay gui) {
+        boolean interrupted = false, reported = false;
+        try {
+            try { core.runLater(gui::open); } catch (Throwable scheduling) { failed(scheduling); }
+            // GUI scheduling failure does not permit closing underneath the still-live writer.
+            // Only the worker waits. A timeout/interruption is a failure, not a fake flush receipt.
+            while (!saveService.isTerminated()) {
                 try {
-                    if (!MarkerProcessor.producesAnyOutput(replayFile)) {
-                        // Immediately close the saving popup, the user doesn't care about it
-                        core.runLater(guiSavingReplay::close);
-
-                        // If we crash right here, on the next start we'll prompt the user for recovery
-                        // but we don't really want that, so drop a marker file to skip recovery for this replay.
-                        Path noRecoverMarker = outputPath.resolveSibling(outputPath.getFileName() + ".no_recover");
-                        Files.createFile(noRecoverMarker);
-
-                        // We still have the replay, so we just save it (at least for a few weeks) in case they change their mind
-                        String replayName = FilenameUtils.getBaseName(outputPath.getFileName().toString());
-                        Path rawFolder = ReplayMod.instance.folders.getRawReplayFolder();
-                        Path rawPath = rawFolder.resolve(outputPath.getFileName());
-                        for (int i = 1; Files.exists(rawPath); i++) {
-                            rawPath = rawPath.resolveSibling(replayName + "." + i + ".mcpr");
+                    if (!saveService.awaitTermination(10, TimeUnit.SECONDS)) {
+                        if (!reported) {
+                            failed(new IOException("Recording writer/main admission did not drain within 10 seconds; retaining recovery"));
+                            showFailure(gui, firstFailure.get()); reported = true;
                         }
-                        replayFile.saveTo(rawPath.toFile());
-                        replayFile.close();
-
-                        // Done, clean up the marker
-                        Files.delete(noRecoverMarker);
-                        return;
                     }
-
-                    replayFile.save();
-                    replayFile.close();
-
-                    if (core.getSettingsRegistry().get(Setting.AUTO_POST_PROCESS) && !ReplayMod.isMinimalMode()) {
-                        outputPaths = MarkerProcessor.apply(outputPath, guiSavingReplay.getProgressBar()::setProgress);
-                    } else {
-                        outputPaths = Collections.singletonList(Pair.of(outputPath, metaData));
-                    }
-                } catch (Exception e) {
-                    logger.error("Saving replay file:", e);
-                    CrashReport crashReport = CrashReport.create(e, "Saving replay file");
-                    core.runLater(() -> Utils.error(logger, VanillaGuiScreen.wrap(mc.currentScreen), crashReport, guiSavingReplay::close));
-                    return;
+                } catch (InterruptedException failure) {
+                    interrupted = true; failed(failure);
+                    if (!reported) { showFailure(gui, firstFailure.get()); reported = true; }
+                    // Continue quarantining the live writer; NEVER shutdownNow or close under it.
                 }
             }
-
-            core.runLater(() -> guiSavingReplay.presentRenameDialog(outputPaths));
-        }).start();
+            // No replayFile monitor is held while taking the recorder monitor (lock order RP -> file).
+            try { resourcePackRecorder.seal(); } catch (Throwable failure) { failed(failure); }
+            if (firstFailure.get() != null) preserve(firstFailure.get());
+            try { packetOutputStream.close(); } catch (Throwable failure) { failed(failure); }
+            if (firstFailure.get() != null) {
+                preserve(firstFailure.get());
+                try { replayFile.close(); } catch (Throwable close) { firstFailure.get().addSuppressed(close); }
+                if (!reported) showFailure(gui, firstFailure.get());
+                return;
+            }
+            boolean producesOutput = MarkerProcessor.producesAnyOutput(replayFile);
+            replayFile.save();
+            replayFile.close();
+            if (!(replayFile instanceof ManagedReplayFile managed) || !managed.isReleased()) {
+                throw new IOException("Recording close has no actual Managed release receipt: " + outputPath);
+            }
+            if (!producesOutput) {
+                if (layout.rawBackupEnabled()) {
+                    Files.createDirectories(layout.rawRoot());
+                    ReplayFileOperations.moveToRaw(outputPath, layout.rawRoot());
+                } else Files.delete(outputPath); // normal no-output only after successful save and true release
+                core.runLater(gui::close);
+                return;
+            }
+            List<Pair<Path, ReplayMetaData>> outputs;
+            if (core.getSettingsRegistry().get(Setting.AUTO_POST_PROCESS) && !ReplayMod.isMinimalMode()) {
+                outputs = MarkerProcessor.apply(outputPath,
+                        value -> core.runLater(() -> gui.getProgressBar().setProgress(value)), layout);
+            } else outputs = Collections.singletonList(Pair.of(outputPath, metaData));
+            core.runLater(() -> gui.presentRenameDialog(outputs));
+        } catch (Throwable failure) {
+            failed(failure); preserve(failure);
+            // Initialization/save failure may leave dirty entries. Preserve BEFORE requesting close.
+            try { replayFile.close(); } catch (Throwable close) { failure.addSuppressed(close); }
+            if (!reported) showFailure(gui, failure);
+        } finally { if (interrupted) Thread.currentThread().interrupt(); }
     }
 
     @Override
@@ -451,30 +563,25 @@ public class PacketListener extends ChannelInboundHandlerAdapter {
     }
 
     public void addMarker(String name, int timestamp) {
-        Entity view = mc.getCameraEntity();
-
-        Marker marker = new Marker();
-        marker.setName(name);
-        marker.setTime(timestamp);
-        if (view != null) {
-            marker.setX(view.getX());
-            marker.setY(view.getY());
-            marker.setZ(view.getZ());
-            marker.setYaw(view.getYaw());
-            marker.setPitch(view.getPitch());
-        }
-        // Roll is always 0
-        saveService.submit(() -> {
-            synchronized (replayFile) {
-                try {
-                    Set<Marker> markers = replayFile.getMarkers().or(HashSet::new);
-                    markers.add(marker);
-                    replayFile.writeMarkers(markers);
-                } catch (IOException e) {
-                    logger.error("Writing markers:", e);
-                }
+        onMain(() -> {
+            Entity view = mc.getCameraEntity();
+            Marker marker = new Marker();
+            marker.setName(name);
+            marker.setTime(timestamp);
+            if (view != null) {
+                marker.setX(view.getX()); marker.setY(view.getY()); marker.setZ(view.getZ());
+                marker.setYaw(view.getYaw()); marker.setPitch(view.getPitch());
             }
-        });
+            submit(() -> {
+                synchronized (replayFile) {
+                    try {
+                        Set<Marker> markers = replayFile.getMarkers().or(HashSet::new);
+                        markers.add(marker);
+                        replayFile.writeMarkers(markers);
+                    } catch (IOException failure) { throw new java.io.UncheckedIOException(failure); }
+                }
+            });
+        }, () -> {});
     }
 
     public long getCurrentDuration() {
@@ -522,10 +629,13 @@ public class PacketListener extends ChannelInboundHandlerAdapter {
             //$$     //$$ UUID uuid = ((S0CPacketSpawnPlayer) msg).func_148948_e().getId();
             //#endif
             //#endif
-                Set<String> uuids = new HashSet<>(Arrays.asList(metaData.getPlayers()));
-                uuids.add(uuid.toString());
-                metaData.setPlayers(uuids.toArray(new String[uuids.size()]));
-                saveMetaData();
+                onMain(() -> {
+                    Set<String> uuids = new HashSet<>(Arrays.asList(metaData.getPlayers()));
+                    uuids.add(uuid.toString());
+                    metaData.setPlayers(uuids.toArray(new String[0]));
+                    ReplayMetaData snapshot = snapshotMetadata();
+                    submit(() -> writeMetadata(snapshot));
+                }, () -> {});
             }
 
             if (msg instanceof ResourcePackSendS2CPacket) {
@@ -549,8 +659,9 @@ public class PacketListener extends ChannelInboundHandlerAdapter {
             //#endif
 
             if (currentRawPacket != null) {
-                save(currentRawPacket);
+                Packet owned = currentRawPacket;
                 currentRawPacket = null;
+                save(owned);
             }
 
             super.channelRead(ctx, msg);
